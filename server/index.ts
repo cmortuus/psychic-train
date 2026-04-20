@@ -2,6 +2,8 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { AutopilotRequest, ShellDisabledError, runAutopilot } from "./autopilot.js";
 import { browseDirectory } from "./browse.js";
+import { executeTool, toolCallSchema } from "./tools.js";
+import { resolveWorkspace } from "./workspace.js";
 import { ChatMessage, ChatRequest, runChatTurn } from "./chatRunner.js";
 import { mergedCatalog } from "./cloudCatalog.js";
 import { logError, logInfo } from "./logger.js";
@@ -47,6 +49,37 @@ const server = createServer(async (req, res) => {
       durationMs: Date.now() - startedAt
     });
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/tool/run") {
+    try {
+      const body = await readJsonBody(req);
+      if (!isRecord(body)) {
+        throw new Error("Invalid request: expected an object body");
+      }
+      const workspaceRoot = typeof body.workspaceRoot === "string" ? body.workspaceRoot.trim() : "";
+      if (!workspaceRoot) {
+        throw new Error("Invalid request: workspaceRoot is required");
+      }
+      const toolCall = toolCallSchema.safeParse(body.toolCall);
+      if (!toolCall.success) {
+        throw new Error(`Invalid request: toolCall — ${toolCall.error.issues[0]?.message || "malformed"}`);
+      }
+      const workspace = await resolveWorkspace(workspaceRoot);
+      const result = await executeTool(toolCall.data, workspace);
+      logInfo("tool.run", {
+        type: toolCall.data.type,
+        ok: result.ok,
+        workspace: workspaceRoot
+      });
+      sendJson(res, 200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Invalid request") ? 400 : 500;
+      logError("tool.error", { status, message });
+      sendJson(res, status, { error: message });
+    }
     return;
   }
 

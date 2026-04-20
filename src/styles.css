@@ -335,6 +335,18 @@ button:disabled {
   align-items: start;
 }
 
+.operator-action .operator-action-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.operator-action-row button {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
 .final-files-list {
   list-style: none;
   margin: 0;
