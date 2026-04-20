@@ -12,7 +12,14 @@ export type BrowseResult = {
   cwd: string;
   parent: string | null;
   entries: BrowseEntry[];
+  totalEntries: number;
+  truncated: boolean;
 };
+
+const MAX_ENTRIES = (() => {
+  const raw = Number(process.env.BROWSE_MAX_ENTRIES);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1000;
+})();
 
 export async function getAllowedRoots(): Promise<string[]> {
   const raw = process.env.BROWSE_ROOTS;
@@ -62,7 +69,7 @@ export async function browseDirectory(requested: string | null): Promise<BrowseR
   }
 
   const rawEntries = await readdir(canonical, { withFileTypes: true });
-  const entries: BrowseEntry[] = rawEntries
+  const allEntries: BrowseEntry[] = rawEntries
     .filter((entry) => !entry.name.startsWith("."))
     .map((entry) => ({
       name: entry.name,
@@ -74,6 +81,10 @@ export async function browseDirectory(requested: string | null): Promise<BrowseR
       return a.name.localeCompare(b.name);
     });
 
+  const totalEntries = allEntries.length;
+  const truncated = totalEntries > MAX_ENTRIES;
+  const entries = truncated ? allEntries.slice(0, MAX_ENTRIES) : allEntries;
+
   const parentCandidate = dirname(canonical);
   const parentCanonical = await realpath(parentCandidate).catch(() => parentCandidate);
   const parent =
@@ -81,5 +92,5 @@ export async function browseDirectory(requested: string | null): Promise<BrowseR
       ? parentCanonical
       : null;
 
-  return { cwd: canonical, parent, entries };
+  return { cwd: canonical, parent, entries, totalEntries, truncated };
 }
