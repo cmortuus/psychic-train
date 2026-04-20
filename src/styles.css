@@ -43,6 +43,54 @@ code {
   display: grid;
   grid-template-columns: minmax(320px, 420px) 1fr;
   min-height: 100vh;
+  transition: grid-template-columns 0.18s ease;
+}
+
+.app-shell.sidebar-is-collapsed {
+  grid-template-columns: 56px 1fr;
+}
+
+.sidebar.collapsed {
+  padding: 12px 8px;
+  gap: 12px;
+  align-items: center;
+}
+
+.sidebar-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar-toggle {
+  background: rgba(201, 219, 233, 0.08);
+  color: #c7d4e0;
+  border: 1px solid rgba(201, 219, 233, 0.14);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 36px;
+  text-align: center;
+}
+
+.sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar.collapsed .sidebar-rail .model-badge {
+  padding: 6px 8px;
+  font-weight: 700;
+  border-radius: 6px;
+  background: rgba(89, 198, 170, 0.18);
+  color: #c7d4e0;
+  font-size: 0.82rem;
 }
 
 .sidebar {

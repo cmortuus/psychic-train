@@ -120,6 +120,15 @@ export function App() {
   );
   const [anonymize, setAnonymize] = useState(true);
   const [usOnly, setUsOnly] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("psychic-train:sidebar-collapsed") === "true";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("psychic-train:sidebar-collapsed", sidebarCollapsed ? "true" : "false");
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -287,90 +296,114 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div>
-          <p className="eyebrow">Dual Agent Coding</p>
-          <h1>Writer and critic in one loop.</h1>
-          <p className="lede">
-            Run both agents through Ollama using cloud-tagged models and stop when the
-            critic approves or the round cap hits.
-          </p>
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
+      <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+        <div className="sidebar-toggle-row">
+          {!sidebarCollapsed ? (
+            <div>
+              <p className="eyebrow">Dual Agent Coding</p>
+              <h1>Writer and critic in one loop.</h1>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? "›" : "‹"}
+          </button>
         </div>
 
-        <form className="config-form" onSubmit={handleSubmit}>
-          <label>
-            Task
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              rows={8}
-            />
-          </label>
-
-          <div className="stack">
-            <ProviderEditor title="Writer" value={writer} onChange={setWriter} groups={groupedModels} usOnly={usOnly} />
-            <ProviderEditor title="Critic" value={critic} onChange={setCritic} groups={groupedModels} usOnly={usOnly} />
-            <section className="provider-block">
-              <div className="provider-header">
-                <h2>Operator</h2>
-              </div>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={enableOperator}
-                  onChange={(event) => setEnableOperator(event.target.checked)}
-                />
-                <span>Enable third model for repo and terminal actions</span>
-              </label>
-              {enableOperator ? (
-                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} groups={groupedModels} usOnly={false} />
-              ) : (
-                <p className="provider-meta">Disabled. The run stops after writer and critic.</p>
-              )}
-            </section>
-          </div>
-
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={anonymize}
-              onChange={(event) => setAnonymize(event.target.checked)}
-            />
-            <span>Anonymize paths, emails, git remotes, and secrets in outbound prompts</span>
-          </label>
-
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={usOnly}
-              onChange={(event) => setUsOnly(event.target.checked)}
-            />
-            <span>Keep code on US models only (disables non-US writer/critic)</span>
-          </label>
-
-          <label>
-            Max rounds
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={maxRounds}
-              onChange={(event) => setMaxRounds(Number(event.target.value))}
-            />
-          </label>
-
-          <div className="button-row">
-            <button type="submit" disabled={isRunning}>
-              {isRunning ? "Running..." : "Run Session"}
-            </button>
-            {isRunning ? (
-              <button type="button" className="stop-button" onClick={handleStop}>
-                Stop
-              </button>
+        {sidebarCollapsed ? (
+          <div className="sidebar-rail">
+            <span className="model-badge" title={`Writer · ${writer.model}`}>W</span>
+            <span className="model-badge" title={`Critic · ${critic.model}`}>C</span>
+            {enableOperator ? (
+              <span className="model-badge" title={`Operator · ${operator.model}`}>O</span>
             ) : null}
           </div>
-        </form>
+        ) : (
+          <form className="config-form" onSubmit={handleSubmit}>
+            <p className="lede">
+              Run both agents through Ollama using cloud-tagged models and stop when the
+              critic approves or the round cap hits.
+            </p>
+
+            <div className="stack">
+              <ProviderEditor title="Writer" value={writer} onChange={setWriter} groups={groupedModels} usOnly={usOnly} />
+              <ProviderEditor title="Critic" value={critic} onChange={setCritic} groups={groupedModels} usOnly={usOnly} />
+              <section className="provider-block">
+                <div className="provider-header">
+                  <h2>Operator</h2>
+                </div>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={enableOperator}
+                    onChange={(event) => setEnableOperator(event.target.checked)}
+                  />
+                  <span>Enable third model for repo and terminal actions</span>
+                </label>
+                {enableOperator ? (
+                  <ProviderEditor title="Operator model" value={operator} onChange={setOperator} groups={groupedModels} usOnly={false} />
+                ) : (
+                  <p className="provider-meta">Disabled. The run stops after writer and critic.</p>
+                )}
+              </section>
+            </div>
+
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={anonymize}
+                onChange={(event) => setAnonymize(event.target.checked)}
+              />
+              <span>Anonymize paths, emails, git remotes, and secrets in outbound prompts</span>
+            </label>
+
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={usOnly}
+                onChange={(event) => setUsOnly(event.target.checked)}
+              />
+              <span>Keep code on US models only (disables non-US writer/critic)</span>
+            </label>
+
+            <label>
+              Max rounds
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={maxRounds}
+                onChange={(event) => setMaxRounds(Number(event.target.value))}
+              />
+            </label>
+
+            <label>
+              Task <span className="provider-meta">(for the Session tab — operator drives the Chat tab)</span>
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                rows={6}
+              />
+            </label>
+
+            <div className="button-row">
+              <button type="submit" disabled={isRunning}>
+                {isRunning ? "Running..." : "Run Session"}
+              </button>
+              {isRunning ? (
+                <button type="button" className="stop-button" onClick={handleStop}>
+                  Stop
+                </button>
+              ) : null}
+            </div>
+          </form>
+        )}
       </aside>
 
       <main className="workspace">
