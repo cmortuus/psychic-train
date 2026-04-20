@@ -58,11 +58,28 @@ function writeLog(level: LogLevel, event: string, fields: LogFields) {
     for (const listener of subscribers) {
       try {
         listener(entry);
-      } catch {
-        // never let a bad subscriber break the logger
+      } catch (err) {
+        // Never let a bad subscriber break the logger, but don't silently
+        // swallow either — surface a rate-limited stderr line so a
+        // permanently-broken subscriber is diagnosable.
+        reportSubscriberError(listener, err);
       }
     }
   }
+}
+
+// One warn per subscriber per minute, keyed by function identity.
+const subscriberErrorLastWarn = new WeakMap<Subscriber, number>();
+const SUBSCRIBER_WARN_INTERVAL_MS = 60_000;
+
+function reportSubscriberError(listener: Subscriber, err: unknown): void {
+  const now = Date.now();
+  const prev = subscriberErrorLastWarn.get(listener) ?? 0;
+  if (now - prev < SUBSCRIBER_WARN_INTERVAL_MS) return;
+  subscriberErrorLastWarn.set(listener, now);
+  const name = listener.name || "<anonymous>";
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[logger.subscriber.error] ${name}: ${message}`);
 }
 
 function sanitizeFields(fields: LogFields) {
