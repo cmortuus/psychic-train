@@ -51,6 +51,11 @@ type Props = {
   onWorkspaceChange: (next: string) => void;
   onDelegateTurn?: (turn: DelegateTurn) => void;
   onDelegateStart?: () => void;
+  minRounds: number;
+  maxRounds: number;
+  mode: "writer_critic" | "consensus";
+  anonymize: boolean;
+  usOnly: boolean;
 };
 
 const STORAGE_KEY = "psychic-train:chat:v1";
@@ -73,7 +78,20 @@ function loadPersisted(): PersistedChat | null {
   }
 }
 
-export function ChatView({ operator, writer, critic, workspaceRoot, onWorkspaceChange, onDelegateTurn, onDelegateStart }: Props) {
+export function ChatView({
+  operator,
+  writer,
+  critic,
+  workspaceRoot,
+  onWorkspaceChange,
+  onDelegateTurn,
+  onDelegateStart,
+  minRounds,
+  maxRounds,
+  mode,
+  anonymize,
+  usOnly
+}: Props) {
   const initialRef = useRef<PersistedChat | null | undefined>(undefined);
   if (initialRef.current === undefined) {
     initialRef.current = loadPersisted();
@@ -246,6 +264,11 @@ export function ChatView({ operator, writer, critic, workspaceRoot, onWorkspaceC
           workspaceRoot,
           writer: normalize(writer),
           critic: normalize(critic),
+          minRounds,
+          maxRounds,
+          mode,
+          anonymize,
+          usOnly,
           ...(operator.model ? { operator: normalize(operator) } : {})
         },
         (event, data) => {

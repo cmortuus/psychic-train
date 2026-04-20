@@ -109,7 +109,7 @@ const defaultProviderFor = (model: string): ProviderConfig => ({
 
 const defaultSettings = (): PersistedSettings => ({
   prompt: defaultPrompt,
-  maxRounds: 4,
+  maxRounds: 0,
   minRounds: 1,
   writer: defaultProviderFor(defaultWriterModel),
   critic: defaultProviderFor(defaultCriticModel),
@@ -487,7 +487,7 @@ export function App() {
 
             <div className="round-range">
               <label>
-                Min rounds
+                Min rounds per task
                 <input
                   type="number"
                   min={1}
@@ -495,20 +495,22 @@ export function App() {
                   onChange={(event) => {
                     const next = Number(event.target.value) || 1;
                     setMinRounds(next);
-                    if (mode !== "consensus" && next > maxRounds) setMaxRounds(next);
+                    if (mode !== "consensus" && maxRounds > 0 && next > maxRounds) setMaxRounds(next);
                   }}
                 />
               </label>
               <label>
-                Max rounds{" "}
+                Max rounds per task{" "}
                 {mode === "consensus" ? (
                   <span className="provider-meta">(ignored in consensus)</span>
+                ) : maxRounds === 0 ? (
+                  <span className="provider-meta">(0 = unlimited)</span>
                 ) : null}
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   value={maxRounds}
-                  onChange={(event) => setMaxRounds(Number(event.target.value))}
+                  onChange={(event) => setMaxRounds(Math.max(0, Number(event.target.value) || 0))}
                   disabled={mode === "consensus"}
                 />
               </label>
@@ -652,6 +654,11 @@ export function App() {
             critic={critic}
             workspaceRoot={workspaceRoot}
             onWorkspaceChange={setWorkspaceRoot}
+            minRounds={minRounds}
+            maxRounds={maxRounds}
+            mode={mode}
+            anonymize={anonymize}
+            usOnly={usOnly}
             onDelegateStart={() => {
               setLiveTranscript([]);
               setResult(null);

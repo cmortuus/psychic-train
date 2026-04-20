@@ -228,10 +228,12 @@ export async function runDualAgentSession(
 
   const consensusMode = request.mode === "consensus" && Boolean(request.operator);
   const minRounds = Math.max(1, request.minRounds || 1);
+  const unlimitedRounds =
+    consensusMode || !Number.isFinite(request.maxRounds) || request.maxRounds <= 0;
   let round = 0;
   while (true) {
     round += 1;
-    if (!consensusMode && round > request.maxRounds) break;
+    if (!unlimitedRounds && round > request.maxRounds) break;
     if (signal?.aborted) {
       return cancelledResult();
     }

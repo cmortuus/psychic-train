@@ -15,6 +15,8 @@ export type AutopilotRequest = {
   critic: ProviderConfig;
   operator?: ProviderConfig;
   maxIterations?: number;
+  minRounds?: number;
+  maxRounds?: number;
   anonymize?: boolean;
   usOnly?: boolean;
   mode?: "writer_critic" | "consensus";
@@ -144,9 +146,10 @@ export async function runAutopilot(
 
     const sessionRequest: SessionRequest = {
       prompt: taskPrompt,
-      maxRounds: 4,
+      maxRounds: typeof request.maxRounds === "number" ? request.maxRounds : 0,
       writer: request.writer,
       critic: request.critic,
+      ...(typeof request.minRounds === "number" ? { minRounds: request.minRounds } : {}),
       ...(request.operator ? { operator: request.operator } : {}),
       ...(typeof request.anonymize === "boolean" ? { anonymize: request.anonymize } : {}),
       ...(typeof request.usOnly === "boolean" ? { usOnly: request.usOnly } : {}),
