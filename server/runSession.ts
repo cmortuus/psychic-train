@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AnonymizeMap, createAnonymizeMap, desanitize, getExtraPatterns, sanitize } from "./anonymizer.js";
+import { logDebug, logError } from "./logger.js";
 import { materializeFiles } from "./materialize.js";
 import { countryOf, isNonUsCloud } from "./modelMeta.js";
 import { preflightDaemons } from "./ollamaApi.js";
@@ -567,12 +568,71 @@ async function generateStructured<T>(
   hooks: SessionHooks,
   signal?: AbortSignal
 ): Promise<T> {
+  const chain = [provider.model, ...(provider.fallbacks ?? [])];
+  let lastRefusalText: string | null = null;
+  let lastRefusalReason: string | null = null;
+
+  for (let idx = 0; idx < chain.length; idx += 1) {
+    const currentProvider = { ...provider, model: chain[idx] as string };
+    try {
+      return await attemptStructured(currentProvider, messages, schema, label, round, hooks, signal);
+    } catch (error) {
+      if (!(error instanceof RefusalError)) throw error;
+      lastRefusalText = error.rawText;
+      lastRefusalReason = error.reason;
+      const next = chain[idx + 1];
+      if (next) {
+        hooks.onRefusalFallback?.({
+          agent: label,
+          round,
+          from: chain[idx] as string,
+          to: next,
+          reason: error.reason
+        });
+        continue;
+      }
+      throw new Error(
+        `Failed to parse ${label} response after fallback chain (${chain.join(" → ")}): ${
+          lastRefusalReason ?? "refusal"
+        }. Raw excerpt: ${excerptOf(lastRefusalText)}`
+      );
+    }
+  }
+
+  // Unreachable; the loop either returns or throws. Kept for type-narrowing.
+  throw new Error(`Fallback chain exhausted for ${label}`);
+}
+
+class RefusalError extends Error {
+  readonly code = "refusal";
+  constructor(readonly rawText: string, readonly reason: string) {
+    super(`Model refused or produced unparseable output: ${reason}`);
+    this.name = "RefusalError";
+  }
+}
+
+async function attemptStructured<T>(
+  provider: SessionRequest["writer"],
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  schema: z.ZodSchema<T>,
+  label: "writer" | "critic" | "operator",
+  round: number,
+  hooks: SessionHooks,
+  signal?: AbortSignal
+): Promise<T> {
   const firstRaw = await generateText(provider, messages, signal);
   const firstAttempt = tryParseJson(firstRaw.text, schema);
   if (firstAttempt.ok) {
     return firstAttempt.value;
   }
 
+  logDebug("session.parse_failure_full", {
+    agent: label,
+    round,
+    attempt: 1,
+    length: firstRaw.text.length,
+    full: firstRaw.text.slice(0, 4000)
+  });
   hooks.onParseFailure?.({
     agent: label,
     round,
@@ -598,14 +658,75 @@ async function generateStructured<T>(
     return retryAttempt.value;
   }
 
+  logError("session.parse_failure_final", {
+    agent: label,
+    round,
+    length: retryRaw.text.length,
+    full: retryRaw.text.slice(0, 4000),
+    reason: retryAttempt.reason
+  });
   hooks.onParseFailure?.({
     agent: label,
     round,
     excerpt: retryAttempt.excerpt
   });
+
+  if (looksLikeRefusal(firstRaw.text) || looksLikeRefusal(retryRaw.text)) {
+    throw new RefusalError(retryRaw.text, retryAttempt.reason);
+  }
+
   throw new Error(
     `Failed to parse ${label} response after retry: ${retryAttempt.reason}. Raw excerpt: ${retryAttempt.excerpt}`
   );
+}
+
+const REFUSAL_HEAD_PHRASES = [
+  "i can't",
+  "i cant",
+  "i cannot",
+  "i won't",
+  "i wont",
+  "i will not",
+  "i'm sorry",
+  "im sorry",
+  "i am sorry",
+  "i'm afraid",
+  "im afraid",
+  "i am afraid",
+  "i'm unable",
+  "im unable",
+  "i am unable",
+  "i'm not able",
+  "im not able",
+  "i am not able",
+  "sorry, i",
+  "sorry i",
+  "sorry, but",
+  "sorry but",
+  "as an ai",
+  "as a language model",
+  "as an assistant"
+];
+
+const REFUSAL_BODY_PATTERNS: RegExp[] = [
+  /\brefuse to (?:help|assist|comply|produce|generate)\b/i,
+  /\b(?:do|does) not (?:feel comfortable|assist|help|produce|generate)\b/i
+];
+
+export function looksLikeRefusal(rawText: string): boolean {
+  const normalized = rawText
+    .trim()
+    .replace(/\u2019/g, "'") // curly apostrophe → straight
+    .toLowerCase();
+  if (!normalized) return false;
+  const head = normalized.slice(0, 500);
+  if (REFUSAL_HEAD_PHRASES.some((phrase) => head.startsWith(phrase))) return true;
+  return REFUSAL_BODY_PATTERNS.some((pattern) => pattern.test(head));
+}
+
+function excerptOf(rawText: string | null): string {
+  if (!rawText) return "(no output)";
+  return rawText.replace(/\s+/g, " ").slice(0, 300);
 }
 
 type ParseResult<T> =

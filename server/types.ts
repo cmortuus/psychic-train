@@ -5,6 +5,11 @@ export type ProviderConfig = {
   model: string;
   baseUrl?: string;
   apiKey?: string;
+  /**
+   * Optional list of model tags (same provider) to escalate to when the
+   * primary model refuses. Non-refusal failures never trigger fallbacks.
+   */
+  fallbacks?: string[];
 };
 
 export type AgentTurn = {
@@ -74,5 +79,12 @@ export type SessionHooks = {
     agent: "writer" | "critic" | "operator";
     round: number;
     excerpt: string;
+  }) => void;
+  onRefusalFallback?: (details: {
+    agent: "writer" | "critic" | "operator";
+    round: number;
+    from: string;
+    to: string;
+    reason: string;
   }) => void;
 };

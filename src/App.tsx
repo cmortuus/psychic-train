@@ -13,6 +13,7 @@ type ProviderConfig = {
   model: string;
   baseUrl: string;
   apiKey: string;
+  fallbacks?: string[];
 };
 
 type TranscriptTurn = {
@@ -335,6 +336,18 @@ export function App() {
           }
           if (event === "round_complete") {
             setActiveAgent(null);
+            return;
+          }
+          if (event === "refusal_fallback") {
+            const d = data as { agent: string; round: number; from: string; to: string };
+            setLiveTranscript((prior) => [
+              ...prior,
+              {
+                role: "system",
+                round: d.round,
+                summary: `${d.agent} refused (${d.from}) → escalating to ${d.to}.`
+              }
+            ]);
             return;
           }
           if (event === "done") {
@@ -764,6 +777,26 @@ function ProviderEditor({
           placeholder="Optional if your Ollama setup needs it"
         />
       </label>
+
+      <label>
+        Fallback on refusal
+        <input
+          type="text"
+          value={(value.fallbacks || []).join(", ")}
+          onChange={(event) => {
+            const next = event.target.value
+              .split(",")
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+            onChange({ ...value, fallbacks: next });
+          }}
+          placeholder="comma-separated model tags, first is tried first"
+        />
+        <span className="provider-meta">
+          Only fires when the primary refuses (declines / apologises instead of producing output).
+          Any local tag you trust works here — e.g. an abliterated variant.
+        </span>
+      </label>
     </section>
   );
 }
@@ -973,10 +1006,14 @@ function latestCodeFrom(transcript: TranscriptTurn[]): string {
 }
 
 function normalizeProvider(provider: ProviderConfig) {
+  const fallbacks = (provider.fallbacks || [])
+    .map((tag) => tag.trim())
+    .filter(Boolean);
   return {
     provider: provider.provider,
     model: provider.model.trim(),
     ...(provider.baseUrl.trim() ? { baseUrl: provider.baseUrl.trim() } : {}),
-    ...(provider.apiKey.trim() ? { apiKey: provider.apiKey.trim() } : {})
+    ...(provider.apiKey.trim() ? { apiKey: provider.apiKey.trim() } : {}),
+    ...(fallbacks.length > 0 ? { fallbacks } : {})
   };
 }

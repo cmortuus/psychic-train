@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   criticResponseSchema,
   extractJsonObject,
+  looksLikeRefusal,
   operatorResponseSchema,
   writerResponseSchema
 } from "./runSession.js";
@@ -149,6 +150,24 @@ describe("operatorResponseSchema.kind", () => {
   });
 });
 
+describe("looksLikeRefusal", () => {
+  it("catches common refusal openings", () => {
+    expect(looksLikeRefusal("I can't help with that.")).toBe(true);
+    expect(looksLikeRefusal("I'm sorry, but I cannot comply.")).toBe(true);
+    expect(looksLikeRefusal("As an AI language model, I must decline.")).toBe(true);
+    expect(looksLikeRefusal("I refuse to produce this content.")).toBe(true);
+  });
+
+  it("passes through normal output", () => {
+    expect(looksLikeRefusal('{"summary":"ok","code":"x"}')).toBe(false);
+    expect(looksLikeRefusal("Here is the implementation:")).toBe(false);
+  });
+
+  it("ignores leading whitespace", () => {
+    expect(looksLikeRefusal("  \n  I'm unable to answer.")).toBe(true);
+  });
+});
+
 vi.mock("./providers.js", () => ({
   generateText: vi.fn()
 }));
@@ -159,10 +178,59 @@ vi.mock("./ollamaApi.js", () => ({
 }));
 
 describe("runDualAgentSession", () => {
+  it("falls back to the next model when the primary refuses", async () => {
+    const { generateText } = await import("./providers.js");
+    const { runDualAgentSession } = await import("./runSession.js");
+    const generate = generateText as unknown as ReturnType<typeof vi.fn>;
+    generate.mockReset();
+
+    const fallbackEvents: Array<{ from: string; to: string }> = [];
+    let writerCalls = 0;
+    generate.mockImplementation(
+      (provider: { model: string }, messages: Array<{ role: string; content: string }>) => {
+        const systemContent = messages.find((m) => m.role === "system")?.content || "";
+        if (systemContent.startsWith("You are the writing")) {
+          writerCalls += 1;
+          // Primary writer refuses on both attempts (first + retry).
+          // Fallback writer returns valid JSON on its first attempt.
+          if (provider.model === "primary-writer") {
+            return Promise.resolve({ text: "I can't help with that request." });
+          }
+          return Promise.resolve({ text: '{"summary":"ok","code":"done"}' });
+        }
+        if (systemContent.includes("harsh, adversarial code reviewer")) {
+          return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
+        }
+        return Promise.resolve({ text: '{}' });
+      }
+    );
+
+    const result = await runDualAgentSession(
+      {
+        prompt: "build x",
+        maxRounds: 1,
+        writer: { provider: "ollama", model: "primary-writer", fallbacks: ["fallback-writer"] },
+        critic: { provider: "ollama", model: "critic" }
+      },
+      {
+        onRefusalFallback(details) {
+          fallbackEvents.push({ from: details.from, to: details.to });
+        }
+      }
+    );
+
+    expect(result.status).toBe("approved");
+    expect(result.finalCode).toBe("done");
+    expect(fallbackEvents).toEqual([{ from: "primary-writer", to: "fallback-writer" }]);
+    // Primary was called twice (first + retry), fallback once.
+    expect(writerCalls).toBe(3);
+  });
+
   it("returns approved once the critic approves", async () => {
     const { generateText } = await import("./providers.js");
     const { runDualAgentSession } = await import("./runSession.js");
     const generate = generateText as unknown as ReturnType<typeof vi.fn>;
+    generate.mockReset();
 
     generate
       .mockResolvedValueOnce({ text: '{"summary":"first pass","code":"console.log(1)"}' })
