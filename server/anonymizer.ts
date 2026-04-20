@@ -27,17 +27,26 @@ const PATTERNS: Pattern[] = [
   { label: "SECRET", regex: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/g }
 ];
 
+// Cache compiled extra patterns until the env var changes (tests mutate it
+// per-case, so we key on the raw string).
+let cachedExtraRaw: string | undefined;
+let cachedExtra: Pattern[] = [];
+
 export function getExtraPatterns(): Pattern[] {
-  const raw = process.env.ANONYMIZE_PATTERNS;
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((literal) => ({
-      label: "USER",
-      regex: new RegExp(escapeRegex(literal), "g")
-    }));
+  const raw = process.env.ANONYMIZE_PATTERNS ?? "";
+  if (raw === cachedExtraRaw) return cachedExtra;
+  cachedExtraRaw = raw;
+  cachedExtra = raw
+    ? raw
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .map((literal) => ({
+          label: "USER",
+          regex: new RegExp(escapeRegex(literal), "g")
+        }))
+    : [];
+  return cachedExtra;
 }
 
 function escapeRegex(literal: string): string {
