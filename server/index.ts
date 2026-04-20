@@ -62,6 +62,24 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/api/watchdog/client-error") {
+    try {
+      const body = await readJsonBody(req);
+      if (!isRecord(body)) throw new Error("Invalid request: expected an object body");
+      const event = typeof body.event === "string" && body.event ? body.event : "client.error";
+      const message = typeof body.message === "string" && body.message ? body.message : "(no message)";
+      const code = typeof body.code === "string" ? body.code : undefined;
+      const url = typeof body.url === "string" ? body.url : undefined;
+      logError(event, { message, ...(code ? { code } : {}), ...(url ? { url } : {}) });
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      const status = msg.startsWith("Invalid request") ? 400 : 500;
+      sendJson(res, status, { error: msg });
+    }
+    return;
+  }
+
   if (req.method === "POST" && req.url === "/api/watchdog/dismiss") {
     try {
       const body = await readJsonBody(req);

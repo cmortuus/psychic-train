@@ -1,8 +1,83 @@
 export type SseHandler = (event: string, data: unknown) => void;
 
+export type StreamSseOptions = {
+  /**
+   * Number of times to transparently re-open the stream after an idle-timeout
+   * or network error before surfacing the failure. Default 0 — most of our
+   * streams are stateful (session, chat, autopilot) and retrying would
+   * duplicate model work. Callers that know their stream is idempotent can
+   * opt in.
+   */
+  retryOnIdle?: number;
+};
+
 const IDLE_TIMEOUT_MS = 45_000;
 
+/**
+ * Report a client-side stream failure to the server-side watchdog so the user
+ * sees it in the Watchdog panel (auto-dismissable, deduped) instead of only as
+ * a blocking toast. Fire-and-forget — never throws, never blocks the caller.
+ */
+function reportToWatchdog(payload: {
+  event: string;
+  message: string;
+  code?: string;
+  url?: string;
+}): void {
+  try {
+    void fetch("/api/watchdog/client-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true
+    }).catch(() => undefined);
+  } catch {
+    // If fetch itself is unavailable or throws synchronously, swallow —
+    // the user already has the toast; we're just trying to enrich the
+    // watchdog panel.
+  }
+}
+
 export async function streamSse(
+  url: string,
+  body: unknown,
+  onEvent: SseHandler,
+  signal?: AbortSignal,
+  options: StreamSseOptions = {}
+): Promise<void> {
+  const maxRetries = Math.max(0, options.retryOnIdle ?? 0);
+  let attempt = 0;
+  while (true) {
+    try {
+      await runStreamOnce(url, body, onEvent, signal);
+      return;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      const isIdle = message.includes("went silent");
+      if (isIdle && attempt < maxRetries) {
+        attempt += 1;
+        reportToWatchdog({
+          event: "sse.idle_timeout.retry",
+          message: `${url}: idle-timeout, retrying (${attempt}/${maxRetries})`,
+          url
+        });
+        // Gentle backoff: 500ms, 1s, 2s, capped.
+        const delay = Math.min(2000, 500 * 2 ** (attempt - 1));
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      reportToWatchdog({
+        event: isIdle ? "sse.idle_timeout" : "sse.error",
+        message: `${url}: ${message}`,
+        url
+      });
+      throw error;
+    }
+  }
+}
+
+async function runStreamOnce(
   url: string,
   body: unknown,
   onEvent: SseHandler,
