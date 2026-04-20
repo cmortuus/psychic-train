@@ -12,7 +12,7 @@ type ProviderResponse = {
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_GENERATE_TIMEOUT_MS = 180_000;
-const DEFAULT_NUM_PREDICT = 4096;
+const DEFAULT_NUM_PREDICT = 8192;
 
 export class CancelledError extends Error {
   readonly code = "cancelled";
@@ -52,6 +52,35 @@ async function callOllamaHttp(
   messages: ChatMessage[],
   signal?: AbortSignal
 ): Promise<ProviderResponse> {
+  let predictBudget = numPredict();
+  // Retry once at 2× budget if the model got cut off by the predict cap (done_reason="length")
+  // and produced no visible content — typical for reasoning models that spent the whole budget thinking.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await callOllamaHttpOnce(config, messages, predictBudget, signal);
+    if (result.text) return { text: result.text };
+    if (result.doneReason === "length" && attempt === 0) {
+      predictBudget = Math.min(predictBudget * 2, 32_768);
+      logDebug("ollama.http.retry_longer", {
+        model: config.model,
+        nextNumPredict: predictBudget
+      });
+      continue;
+    }
+    throw new Error(
+      `Ollama returned an empty response for model ${config.model} (done_reason=${result.doneReason || "unknown"})`
+    );
+  }
+  throw new Error(`Ollama returned an empty response for model ${config.model}`);
+}
+
+type OllamaChatRaw = { text: string; doneReason: string | null };
+
+async function callOllamaHttpOnce(
+  config: ProviderConfig,
+  messages: ChatMessage[],
+  predictBudget: number,
+  signal?: AbortSignal
+): Promise<OllamaChatRaw> {
   if (signal?.aborted) throw new CancelledError();
 
   const baseUrl =
@@ -61,9 +90,8 @@ async function callOllamaHttp(
     model: config.model,
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     stream: false,
-    think: false,
     options: {
-      num_predict: numPredict()
+      num_predict: predictBudget
     }
   };
 
@@ -71,7 +99,7 @@ async function callOllamaHttp(
     model: config.model,
     host: baseUrl,
     messageCount: messages.length,
-    numPredict: body.options.num_predict
+    numPredict: predictBudget
   });
 
   const timeout = ollamaTimeoutMs();
@@ -115,15 +143,10 @@ async function callOllamaHttp(
   }
 
   const text = (payload.message?.content || "").trim();
-  if (!text) {
-    throw new Error(`Ollama returned an empty response for model ${config.model} (done_reason=${payload.done_reason || "unknown"})`);
-  }
-
   logDebug("ollama.http.complete", {
     model: config.model,
     length: text.length,
     doneReason: payload.done_reason || "unknown"
   });
-
-  return { text };
+  return { text, doneReason: payload.done_reason ?? null };
 }
