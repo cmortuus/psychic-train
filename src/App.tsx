@@ -85,28 +85,61 @@ const defaultOperatorModel = "gpt-oss:20b-cloud";
 
 const defaultPrompt = `Build a small TypeScript CLI that reads a markdown task list and outputs completed items in JSON.`;
 
+const SETTINGS_KEY = "psychic-train:settings:v1";
+
+type PersistedSettings = {
+  prompt: string;
+  maxRounds: number;
+  minRounds: number;
+  writer: ProviderConfig;
+  critic: ProviderConfig;
+  operator: ProviderConfig;
+  enableOperator: boolean;
+  anonymize: boolean;
+  usOnly: boolean;
+  mode: "writer_critic" | "consensus";
+};
+
+const defaultProviderFor = (model: string): ProviderConfig => ({
+  provider: "ollama",
+  model,
+  baseUrl: "http://127.0.0.1:11434",
+  apiKey: ""
+});
+
+const defaultSettings = (): PersistedSettings => ({
+  prompt: defaultPrompt,
+  maxRounds: 4,
+  minRounds: 1,
+  writer: defaultProviderFor(defaultWriterModel),
+  critic: defaultProviderFor(defaultCriticModel),
+  operator: defaultProviderFor(defaultOperatorModel),
+  enableOperator: true,
+  anonymize: true,
+  usOnly: false,
+  mode: "writer_critic"
+});
+
+function loadSettings(): PersistedSettings {
+  if (typeof window === "undefined") return defaultSettings();
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return defaultSettings();
+    const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+    return { ...defaultSettings(), ...parsed };
+  } catch {
+    return defaultSettings();
+  }
+}
+
 export function App() {
-  const [prompt, setPrompt] = useState(defaultPrompt);
-  const [maxRounds, setMaxRounds] = useState(4);
-  const [writer, setWriter] = useState<ProviderConfig>({
-    provider: "ollama",
-    model: defaultWriterModel,
-    baseUrl: "http://127.0.0.1:11434",
-    apiKey: ""
-  });
-  const [critic, setCritic] = useState<ProviderConfig>({
-    provider: "ollama",
-    model: defaultCriticModel,
-    baseUrl: "http://127.0.0.1:11434",
-    apiKey: ""
-  });
-  const [enableOperator, setEnableOperator] = useState(true);
-  const [operator, setOperator] = useState<ProviderConfig>({
-    provider: "ollama",
-    model: defaultOperatorModel,
-    baseUrl: "http://127.0.0.1:11434",
-    apiKey: ""
-  });
+  const initialSettings = loadSettings();
+  const [prompt, setPrompt] = useState(initialSettings.prompt);
+  const [maxRounds, setMaxRounds] = useState(initialSettings.maxRounds);
+  const [writer, setWriter] = useState<ProviderConfig>(initialSettings.writer);
+  const [critic, setCritic] = useState<ProviderConfig>(initialSettings.critic);
+  const [enableOperator, setEnableOperator] = useState(initialSettings.enableOperator);
+  const [operator, setOperator] = useState<ProviderConfig>(initialSettings.operator);
   const [result, setResult] = useState<SessionResponse | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<TranscriptTurn[]>([]);
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
@@ -119,10 +152,10 @@ export function App() {
   const [isWide, setIsWide] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.matchMedia("(min-width: 1400px)").matches : true
   );
-  const [anonymize, setAnonymize] = useState(true);
-  const [usOnly, setUsOnly] = useState(false);
-  const [mode, setMode] = useState<"writer_critic" | "consensus">("writer_critic");
-  const [minRounds, setMinRounds] = useState(1);
+  const [anonymize, setAnonymize] = useState(initialSettings.anonymize);
+  const [usOnly, setUsOnly] = useState(initialSettings.usOnly);
+  const [mode, setMode] = useState<"writer_critic" | "consensus">(initialSettings.mode);
+  const [minRounds, setMinRounds] = useState(initialSettings.minRounds);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("psychic-train:sidebar-collapsed") === "true";
@@ -137,6 +170,30 @@ export function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("psychic-train:sidebar-collapsed", sidebarCollapsed ? "true" : "false");
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handle = window.setTimeout(() => {
+      const payload: PersistedSettings = {
+        prompt,
+        maxRounds,
+        minRounds,
+        writer,
+        critic,
+        operator,
+        enableOperator,
+        anonymize,
+        usOnly,
+        mode
+      };
+      try {
+        window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
+      } catch {
+        // quota or disabled — drop silently
+      }
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [prompt, maxRounds, minRounds, writer, critic, operator, enableOperator, anonymize, usOnly, mode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
