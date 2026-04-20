@@ -42,6 +42,7 @@ const CHAT_SYSTEM_PROMPT = [
   '{"type":"read_file","path":"./rel/or/abs"} — read a text file in the workspace.',
   '{"type":"write_file","path":"./rel","content":"..."} — write a text file in the workspace.',
   '{"type":"list_dir","path":"."} — list directory contents in the workspace.',
+  '{"type":"run_shell","command":"npm","args":["test"]} — run an allowlisted shell command (npm/yarn/pnpm/bun/node/tsc/vitest/pytest/python/cargo/go/make/deno) inside the workspace. Requires ALLOW_SHELL_EXEC=true on the server; git is blocked here (use run_git).',
   "After a tool runs, you will receive its result as a tool message; decide the next JSON action.",
   "Use delegate_coding_task only when the user clearly asks for new code; otherwise explain what you can do or run a tool first.",
   "Finish every exchange with a message action so the user knows the turn is complete."
