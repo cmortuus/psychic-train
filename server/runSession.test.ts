@@ -171,14 +171,14 @@ describe("runDualAgentSession", () => {
         if (systemContent.startsWith("You are the writing")) {
           return Promise.resolve({ text: '{"summary":"draft","code":"const x = 1;"}' });
         }
-        if (systemContent.startsWith("You are the critic")) {
+        if (systemContent.includes("harsh, adversarial code reviewer")) {
           return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
         }
-        if (systemContent.startsWith("You are the operator reviewing")) {
+        if (systemContent.includes("operator acting as a harsh second reviewer")) {
           const calls = generate.mock.calls.filter((c: unknown[]) => {
             const msgs = c[1] as Array<{ role: string; content: string }>;
             const sys = msgs.find((m) => m.role === "system")?.content || "";
-            return sys.startsWith("You are the operator reviewing");
+            return sys.includes("operator acting as a harsh second reviewer");
           }).length;
           return Promise.resolve({
             text:
@@ -223,7 +223,7 @@ describe("runDualAgentSession", () => {
         if (systemContent.startsWith("You are the writing")) {
           return Promise.resolve({ text: '{"summary":"draft","code":"x"}' });
         }
-        if (systemContent.startsWith("You are the critic")) {
+        if (systemContent.includes("harsh, adversarial code reviewer")) {
           return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
         }
         return Promise.resolve({ text: '{}' });
@@ -261,14 +261,14 @@ describe("runDualAgentSession", () => {
         if (systemContent.startsWith("You are the writing")) {
           return Promise.resolve({ text: '{"summary":"draft","code":"x"}' });
         }
-        if (systemContent.startsWith("You are the critic")) {
+        if (systemContent.includes("harsh, adversarial code reviewer")) {
           return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
         }
-        if (systemContent.startsWith("You are the operator reviewing")) {
+        if (systemContent.includes("operator acting as a harsh second reviewer")) {
           const reviewCalls = generate.mock.calls.filter((c: unknown[]) => {
             const msgs = c[1] as Array<{ role: string; content: string }>;
             const sys = msgs.find((m) => m.role === "system")?.content || "";
-            return sys.startsWith("You are the operator reviewing");
+            return sys.includes("operator acting as a harsh second reviewer");
           }).length;
           return Promise.resolve({
             text:
