@@ -35,14 +35,31 @@ type SessionResponse = {
   };
 };
 
-const curatedCloudModels = [
-  "gpt-oss:20b-cloud",
-  "gpt-oss:120b-cloud",
-  "deepseek-v3.1:671b-cloud",
-  "qwen3-coder:480b-cloud",
-  "kimi-k2:1t-cloud",
-  "glm-4.6:cloud"
+type ModelInfo = { tag: string; country: string; maker: string };
+
+const curatedModels: ModelInfo[] = [
+  { tag: "gpt-oss:20b-cloud", country: "US", maker: "OpenAI" },
+  { tag: "gpt-oss:120b-cloud", country: "US", maker: "OpenAI" },
+  { tag: "deepseek-v3.1:671b-cloud", country: "China", maker: "DeepSeek" },
+  { tag: "qwen3-coder:480b-cloud", country: "China", maker: "Alibaba Qwen" },
+  { tag: "kimi-k2:1t-cloud", country: "China", maker: "Moonshot" },
+  { tag: "glm-4.6:cloud", country: "China", maker: "Zhipu AI" }
 ];
+
+const COUNTRY_ORDER: Record<string, number> = {
+  US: 0,
+  China: 1,
+  France: 2,
+  UK: 3,
+  Canada: 4,
+  Germany: 5,
+  Israel: 6,
+  Local: 99
+};
+
+function countryRank(country: string): number {
+  return COUNTRY_ORDER[country] ?? 50;
+}
 
 const defaultWriterModel = "gpt-oss:20b-cloud";
 const defaultCriticModel = "qwen3-coder:480b-cloud";
@@ -100,8 +117,31 @@ export function App() {
     };
   }, []);
 
-  const availableModels = useMemo(() => {
-    return Array.from(new Set([...curatedCloudModels, ...localModels])).sort();
+  const groupedModels = useMemo(() => {
+    const seen = new Map<string, ModelInfo>();
+    for (const entry of curatedModels) {
+      seen.set(entry.tag, entry);
+    }
+    for (const tag of localModels) {
+      if (!seen.has(tag)) {
+        seen.set(tag, { tag, country: "Local", maker: "ollama" });
+      }
+    }
+    const groups = new Map<string, ModelInfo[]>();
+    for (const info of seen.values()) {
+      const list = groups.get(info.country) || [];
+      list.push(info);
+      groups.set(info.country, list);
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => {
+        const rank = countryRank(a) - countryRank(b);
+        return rank !== 0 ? rank : a.localeCompare(b);
+      })
+      .map(([country, entries]) => ({
+        country,
+        entries: entries.sort((x, y) => x.tag.localeCompare(y.tag))
+      }));
   }, [localModels]);
 
   const statusLabel = useMemo(() => {
@@ -213,8 +253,8 @@ export function App() {
           </label>
 
           <div className="stack">
-            <ProviderEditor title="Writer" value={writer} onChange={setWriter} models={availableModels} />
-            <ProviderEditor title="Critic" value={critic} onChange={setCritic} models={availableModels} />
+            <ProviderEditor title="Writer" value={writer} onChange={setWriter} groups={groupedModels} />
+            <ProviderEditor title="Critic" value={critic} onChange={setCritic} groups={groupedModels} />
             <section className="provider-block">
               <div className="provider-header">
                 <h2>Operator</h2>
@@ -228,7 +268,7 @@ export function App() {
                 <span>Enable third model for repo and terminal actions</span>
               </label>
               {enableOperator ? (
-                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} models={availableModels} />
+                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} groups={groupedModels} />
               ) : (
                 <p className="provider-meta">Disabled. The run stops after writer and critic.</p>
               )}
@@ -346,14 +386,16 @@ function ProviderEditor({
   title,
   value,
   onChange,
-  models
+  groups
 }: {
   title: string;
   value: ProviderConfig;
   onChange: (next: ProviderConfig) => void;
-  models: string[];
+  groups: Array<{ country: string; entries: ModelInfo[] }>;
 }) {
-  const datalistId = `models-${title.replace(/\s+/g, "-").toLowerCase()}`;
+  const selected = groups
+    .flatMap((group) => group.entries)
+    .find((entry) => entry.tag === value.model);
 
   return (
     <section className="provider-block">
@@ -368,21 +410,25 @@ function ProviderEditor({
 
       <label>
         Model
-        <input
-          type="text"
-          list={datalistId}
+        <select
           value={value.model}
           onChange={(event) => onChange({ ...value, model: event.target.value })}
-          placeholder="e.g. gpt-oss:20b-cloud"
-        />
-        <datalist id={datalistId}>
-          {models.map((model) => (
-            <option key={model} value={model} />
+        >
+          {groups.length === 0 ? <option value="">No models available</option> : null}
+          {groups.map((group) => (
+            <optgroup key={group.country} label={group.country}>
+              {group.entries.map((entry) => (
+                <option key={entry.tag} value={entry.tag}>
+                  {entry.tag} — {entry.country} · {entry.maker}
+                </option>
+              ))}
+            </optgroup>
           ))}
-        </datalist>
+        </select>
       </label>
 
       <p className="provider-meta">
+        {selected ? `${selected.country} · ${selected.maker}. ` : ""}
         Invoked as <code>{`ollama run ${value.model || "<model>"}`}</code>.
       </p>
 
