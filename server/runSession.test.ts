@@ -45,9 +45,17 @@ describe("extractJsonObject", () => {
 });
 
 describe("writerResponseSchema", () => {
-  it("accepts empty code", () => {
-    const parsed = writerResponseSchema.parse({ summary: "ok", code: "" });
-    expect(parsed.code).toBe("");
+  it("accepts empty code when files[] has at least one entry", () => {
+    const parsed = writerResponseSchema.parse({
+      summary: "ok",
+      code: "",
+      files: [{ path: "a.txt", content: "" }]
+    });
+    expect(parsed.files?.length).toBe(1);
+  });
+
+  it("rejects a response with neither code nor files", () => {
+    expect(() => writerResponseSchema.parse({ summary: "ok" })).toThrow(/at least one/);
   });
 
   it("rejects empty summary", () => {

@@ -16,11 +16,16 @@ const writerFileSchema = z.object({
   content: z.string()
 });
 
-export const writerResponseSchema = z.object({
-  summary: z.string().min(1),
-  code: z.string(),
-  files: z.array(writerFileSchema).optional()
-});
+export const writerResponseSchema = z
+  .object({
+    summary: z.string().min(1),
+    code: z.string().optional(),
+    files: z.array(writerFileSchema).optional()
+  })
+  .refine(
+    (value) => (value.code && value.code.length > 0) || (value.files && value.files.length > 0),
+    { message: "writer must emit at least one of: code (string), files (non-empty array)" }
+  );
 
 export type WriterFile = z.infer<typeof writerFileSchema>;
 
@@ -96,12 +101,14 @@ export const operatorResponseSchema = z.object({
 
 const writerSystemPrompt = [
   "You are the writing model in a two-agent coding system.",
-  "Produce implementation output only as strict JSON with keys: summary, code, files.",
-  "summary: one paragraph describing what you built.",
-  "code: the primary module contents (entry point) — always include this.",
-  "files: OPTIONAL array of { path, content } objects for additional files. Use this whenever the solution spans more than one file (tests, package.json, README, sub-modules, config). Paths must be relative to the workspace root and must not contain '..' or absolute prefixes.",
-  "Do not emit placeholders like \"TODO\" or \"<insert code here>\"; every file you list must be complete.",
-  "When you receive critic feedback, revise the code and files directly and incorporate only justified changes."
+  "Produce implementation output only as strict JSON.",
+  "Keys: summary (required), files (preferred), code (legacy single-file fallback).",
+  "summary: one paragraph describing the full set of files you are producing or changing.",
+  "files: array of { path, content } objects — this is the primary shape. Use it for any project that has more than one file (tests, package.json, README, submodules, config). Paths must be relative to the workspace root; no absolute paths and no '..'.",
+  "code: only use this when the whole output is a single file and you don't want to express a path. The orchestrator will treat it as a legacy entry point.",
+  "Emit at least one of files or code. When modifying an existing project, return every file you are creating or changing; unchanged files can be omitted.",
+  "Do not emit placeholders like \"TODO\" or \"<insert code here>\"; every file you list must be complete and compilable.",
+  "When you receive critic feedback, revise the files directly and incorporate only justified changes."
 ].join(" ");
 
 const criticSystemPrompt = [
@@ -207,6 +214,7 @@ export async function runDualAgentSession(
     return {
       transcript,
       finalCode: currentCode,
+      finalFiles: finalFilesOf(latestWriterFiles, currentCode),
       status: "cancelled",
       ...(operatorPlan ? { operatorPlan } : {})
     };
@@ -263,15 +271,15 @@ export async function runDualAgentSession(
       model: request.writer.model,
       durationMs: Date.now() - writerStartedAt
     });
-    currentCode = writerData.code;
-    currentSummary = writerData.summary;
     latestWriterFiles = writerData.files;
+    currentCode = writerData.code || (writerData.files?.[0]?.content ?? "");
+    currentSummary = writerData.summary;
 
     const writerTurn: AgentTurn = {
       role: "writer",
       round,
       summary: writerData.summary,
-      code: writerData.code
+      ...(currentCode ? { code: currentCode } : {})
     };
     transcript.push(writerTurn);
     hooks.onTurn?.(writerTurn);
@@ -399,6 +407,7 @@ export async function runDualAgentSession(
       return {
         transcript,
         finalCode: currentCode,
+        finalFiles: finalFilesOf(latestWriterFiles, currentCode),
         status: "approved",
         ...(operatorPlan ? { operatorPlan } : {})
       };
@@ -418,9 +427,19 @@ export async function runDualAgentSession(
   return {
     transcript,
     finalCode: currentCode,
+    finalFiles: finalFilesOf(latestWriterFiles, currentCode),
     status: "max_rounds",
     ...(operatorPlan ? { operatorPlan } : {})
   };
+}
+
+function finalFilesOf(
+  files: Array<{ path: string; content: string }> | undefined,
+  code: string
+): Array<{ path: string; content: string }> {
+  if (files && files.length > 0) return files;
+  if (code && code.length > 0) return [{ path: "index.txt", content: code }];
+  return [];
 }
 
 async function runOperatorStage(

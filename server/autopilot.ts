@@ -33,6 +33,7 @@ export type AutopilotResult = {
   status: AutopilotStatus;
   iterations: number;
   finalCode: string;
+  finalFiles: Array<{ path: string; content: string }>;
   lastTestResult?: TestRunResult;
   committed?: boolean;
   reason?: string;
@@ -130,6 +131,7 @@ export async function runAutopilot(
   const cap = maxIterations(request);
   let lastTestResult: TestRunResult | undefined;
   let lastFinalCode = "";
+  let lastFinalFiles: Array<{ path: string; content: string }> = [];
 
   for (let iteration = 1; iteration <= cap; iteration += 1) {
     if (signal?.aborted) {
@@ -137,6 +139,7 @@ export async function runAutopilot(
         status: "cancelled",
         iterations: iteration - 1,
         finalCode: lastFinalCode,
+        finalFiles: lastFinalFiles,
         lastTestResult
       };
     }
@@ -167,12 +170,16 @@ export async function runAutopilot(
     });
 
     lastFinalCode = sessionResult.finalCode || lastFinalCode;
+    if (sessionResult.finalFiles && sessionResult.finalFiles.length > 0) {
+      lastFinalFiles = sessionResult.finalFiles;
+    }
 
     if (sessionResult.status === "cancelled") {
       return {
         status: "cancelled",
         iterations: iteration,
         finalCode: lastFinalCode,
+        finalFiles: lastFinalFiles,
         lastTestResult
       };
     }
@@ -183,6 +190,7 @@ export async function runAutopilot(
         status: "failed",
         iterations: iteration,
         finalCode: lastFinalCode,
+        finalFiles: lastFinalFiles,
         lastTestResult,
         reason: `Session status: ${sessionResult.status}`
       };
@@ -209,6 +217,7 @@ export async function runAutopilot(
         status: "approved",
         iterations: iteration,
         finalCode: lastFinalCode,
+        finalFiles: lastFinalFiles,
         lastTestResult: testResult,
         committed
       };
@@ -221,6 +230,7 @@ export async function runAutopilot(
     status: "budget_exhausted",
     iterations: cap,
     finalCode: lastFinalCode,
+    finalFiles: lastFinalFiles,
     lastTestResult,
     reason: `Autopilot stopped after ${cap} iteration(s) without green tests.`
   };
