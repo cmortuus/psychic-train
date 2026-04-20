@@ -151,6 +151,35 @@ describe("operatorResponseSchema.kind", () => {
   });
 });
 
+describe("writerResponseSchema deep parse robustness", () => {
+  it("recovers from trailing commas", () => {
+    const text = '{"summary":"ok","code":"x","files":[{"path":"a.ts","content":"a"},],}';
+    const parsed = writerResponseSchema.safeParse(JSON.parse(require("jsonrepair").jsonrepair(text)));
+    expect(parsed.success).toBe(true);
+  });
+
+  it("survives truncated JSON (missing closing brace)", () => {
+    const truncated = '{"summary":"ok","code":"abc","files":[{"path":"a.ts","content":"a"}';
+    const repaired = require("jsonrepair").jsonrepair(truncated);
+    const parsed = writerResponseSchema.parse(JSON.parse(repaired));
+    expect(parsed.files).toHaveLength(1);
+  });
+
+  it("tolerates smart quotes via jsonrepair", () => {
+    const smart = '{\u201csummary\u201d:\u201cok\u201d,\u201ccode\u201d:\u201cx\u201d}';
+    const repaired = require("jsonrepair").jsonrepair(smart);
+    const parsed = writerResponseSchema.parse(JSON.parse(repaired));
+    expect(parsed.summary).toBe("ok");
+  });
+
+  it("tolerates single-quoted keys/values", () => {
+    const sq = "{'summary':'ok','code':'x'}";
+    const repaired = require("jsonrepair").jsonrepair(sq);
+    const parsed = writerResponseSchema.parse(JSON.parse(repaired));
+    expect(parsed.code).toBe("x");
+  });
+});
+
 describe("writerResponseSchema parse robustness", () => {
   it("recovers from raw newlines inside the content field via repair pass", async () => {
     // Simulate what gpt-oss does on multi-file writer output: emits literal LFs
