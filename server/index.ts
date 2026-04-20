@@ -1,0 +1,203 @@
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { logError, logInfo } from "./logger.js";
+import { runDualAgentSession } from "./runSession.js";
+import { ProviderConfig, SessionRequest } from "./types.js";
+
+const port = Number(process.env.PORT || 8787);
+
+const server = createServer(async (req, res) => {
+  const startedAt = Date.now();
+  setCorsHeaders(res);
+
+  if (req.method === "OPTIONS") {
+    logInfo("http.request", {
+      method: req.method,
+      path: req.url || "",
+      status: 204,
+      durationMs: Date.now() - startedAt
+    });
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (!req.url) {
+    logError("http.request.invalid", {
+      method: req.method || "",
+      reason: "missing_url"
+    });
+    sendJson(res, 400, { error: "Missing URL" });
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/api/health") {
+    logInfo("http.request", {
+      method: req.method,
+      path: req.url,
+      status: 200,
+      durationMs: Date.now() - startedAt
+    });
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/session") {
+    try {
+      const body = await readJsonBody(req);
+      const parsed = parseSessionRequest(body);
+      logInfo("session.start", {
+        promptLength: parsed.prompt.length,
+        maxRounds: parsed.maxRounds,
+        writerModel: parsed.writer.model,
+        criticModel: parsed.critic.model
+      });
+      const result = await runDualAgentSession(parsed, {
+        onRoundStart(details) {
+          logInfo("session.round.start", details);
+        },
+        onRoundComplete(details) {
+          logInfo("session.round.complete", details);
+        },
+        onParseFailure(details) {
+          logError("session.parse_failure", details);
+        }
+      });
+      logInfo("session.complete", {
+        status: result.status,
+        transcriptTurns: result.transcript.length,
+        finalCodeLength: result.finalCode.length
+      });
+      logInfo("http.request", {
+        method: req.method,
+        path: req.url,
+        status: 200,
+        durationMs: Date.now() - startedAt
+      });
+      sendJson(res, 200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Invalid request") ? 400 : 500;
+      logError("session.error", {
+        status,
+        message
+      });
+      logInfo("http.request", {
+        method: req.method,
+        path: req.url,
+        status,
+        durationMs: Date.now() - startedAt
+      });
+      sendJson(res, status, { error: message });
+    }
+    return;
+  }
+
+  logInfo("http.request", {
+    method: req.method || "",
+    path: req.url,
+    status: 404,
+    durationMs: Date.now() - startedAt
+  });
+  sendJson(res, 404, { error: "Not found" });
+});
+
+server.listen(port, () => {
+  logInfo("server.start", {
+    port,
+    logLevel: process.env.LOG_LEVEL || "info"
+  });
+});
+
+function setCorsHeaders(res: ServerResponse) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Content-Type", "application/json");
+}
+
+function sendJson(res: ServerResponse, status: number, payload: unknown) {
+  res.writeHead(status);
+  res.end(JSON.stringify(payload));
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  const body = Buffer.concat(chunks).toString("utf8").trim();
+  if (!body) {
+    throw new Error("Invalid request: empty body");
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error("Invalid request: body must be valid JSON");
+  }
+}
+
+function parseSessionRequest(value: unknown): SessionRequest {
+  if (!isRecord(value)) {
+    throw new Error("Invalid request: expected an object body");
+  }
+
+  const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
+  const maxRounds = typeof value.maxRounds === "number" ? value.maxRounds : 4;
+
+  if (!prompt) {
+    throw new Error("Invalid request: prompt is required");
+  }
+
+  if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 8) {
+    throw new Error("Invalid request: maxRounds must be an integer between 1 and 8");
+  }
+
+  return {
+    prompt,
+    maxRounds,
+    writer: parseProvider(value.writer, "writer"),
+    critic: parseProvider(value.critic, "critic"),
+    ...(value.operator ? { operator: parseProvider(value.operator, "operator") } : {})
+  };
+}
+
+function parseProvider(value: unknown, label: string): ProviderConfig {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid request: ${label} must be an object`);
+  }
+
+  const provider = value.provider;
+  const model = typeof value.model === "string" ? value.model.trim() : "";
+  const baseUrl = typeof value.baseUrl === "string" ? value.baseUrl.trim() : undefined;
+  const apiKey = typeof value.apiKey === "string" ? value.apiKey : undefined;
+
+  if (provider !== "ollama") {
+    throw new Error(`Invalid request: ${label}.provider must be "ollama"`);
+  }
+
+  if (!model) {
+    throw new Error(`Invalid request: ${label}.model is required`);
+  }
+
+  if (baseUrl) {
+    try {
+      new URL(baseUrl);
+    } catch {
+      throw new Error(`Invalid request: ${label}.baseUrl must be a valid URL`);
+    }
+  }
+
+  return {
+    provider,
+    model,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiKey ? { apiKey } : {})
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
