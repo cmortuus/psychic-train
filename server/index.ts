@@ -475,8 +475,8 @@ function parseSessionRequest(value: unknown): SessionRequest {
     throw new Error("Invalid request: prompt is required");
   }
 
-  if (!Number.isInteger(maxRounds) || maxRounds < 1) {
-    throw new Error("Invalid request: maxRounds must be an integer >= 1");
+  if (!Number.isInteger(maxRounds) || maxRounds < 0) {
+    throw new Error("Invalid request: maxRounds must be an integer >= 0 (0 = unlimited)");
   }
 
   return {
@@ -555,6 +555,12 @@ function parseAutopilotRequest(value: unknown): AutopilotRequest {
     ...(value.operator ? { operator: parseProvider(value.operator, "operator") } : {}),
     ...(Number.isInteger(value.maxIterations) && (value.maxIterations as number) >= 1
       ? { maxIterations: value.maxIterations as number }
+      : {}),
+    ...(Number.isInteger(value.minRounds) && (value.minRounds as number) >= 1
+      ? { minRounds: value.minRounds as number }
+      : {}),
+    ...(Number.isInteger(value.maxRounds) && (value.maxRounds as number) >= 0
+      ? { maxRounds: value.maxRounds as number }
       : {}),
     ...(typeof value.anonymize === "boolean" ? { anonymize: value.anonymize } : {}),
     ...(typeof value.usOnly === "boolean" ? { usOnly: value.usOnly } : {}),
