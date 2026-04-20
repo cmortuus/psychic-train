@@ -226,8 +226,12 @@ const server = createServer(async (req, res) => {
       const stopHeartbeat = startSseHeartbeat(res);
 
       const send = (event: string, data: unknown) => {
-        if (!res.writableEnded) {
+        if (res.writableEnded) return;
+        try {
           res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          // Client may have disconnected between the writableEnded check
+          // and the write; swallow so the session hook doesn't crash.
         }
       };
 
@@ -379,8 +383,12 @@ const server = createServer(async (req, res) => {
       const stopHeartbeat = startSseHeartbeat(res);
 
       const send = (event: string, data: unknown) => {
-        if (!res.writableEnded) {
+        if (res.writableEnded) return;
+        try {
           res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          // Client may have disconnected between the writableEnded check
+          // and the write; swallow so the session hook doesn't crash.
         }
       };
 
@@ -449,8 +457,12 @@ const server = createServer(async (req, res) => {
       const stopHeartbeat = startSseHeartbeat(res);
 
       const send = (event: string, data: unknown) => {
-        if (!res.writableEnded) {
+        if (res.writableEnded) return;
+        try {
           res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          // Client may have disconnected between the writableEnded check
+          // and the write; swallow so the session hook doesn't crash.
         }
       };
 
