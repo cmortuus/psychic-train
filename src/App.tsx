@@ -385,13 +385,17 @@ export function App() {
             </label>
 
             <label>
-              Max rounds
+              Max rounds{" "}
+              {mode === "consensus" ? (
+                <span className="provider-meta">(ignored in consensus — Stop to end)</span>
+              ) : null}
               <input
                 type="number"
                 min={1}
                 max={8}
                 value={maxRounds}
                 onChange={(event) => setMaxRounds(Number(event.target.value))}
+                disabled={mode === "consensus"}
               />
             </label>
 

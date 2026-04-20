@@ -211,6 +211,57 @@ describe("runDualAgentSession", () => {
     expect(approvalNote.summary).toContain("all approved");
   });
 
+  it("consensus mode runs past maxRounds until everyone approves", async () => {
+    const { generateText } = await import("./providers.js");
+    const { runDualAgentSession } = await import("./runSession.js");
+    const generate = generateText as unknown as ReturnType<typeof vi.fn>;
+    generate.mockReset();
+
+    // Force 10 writer rounds before the operator approves. maxRounds is only 2 —
+    // writer_critic would stop at round 2; consensus must ignore the cap.
+    generate.mockImplementation(
+      (_provider: unknown, messages: Array<{ role: string; content: string }>) => {
+        const systemContent = messages.find((m) => m.role === "system")?.content || "";
+        if (systemContent.startsWith("You are the writing")) {
+          return Promise.resolve({ text: '{"summary":"draft","code":"x"}' });
+        }
+        if (systemContent.startsWith("You are the critic")) {
+          return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
+        }
+        if (systemContent.startsWith("You are the operator reviewing")) {
+          const reviewCalls = generate.mock.calls.filter((c: unknown[]) => {
+            const msgs = c[1] as Array<{ role: string; content: string }>;
+            const sys = msgs.find((m) => m.role === "system")?.content || "";
+            return sys.startsWith("You are the operator reviewing");
+          }).length;
+          return Promise.resolve({
+            text:
+              reviewCalls <= 9
+                ? '{"summary":"still no","verdict":"revise","required_changes":["keep at it"]}'
+                : '{"summary":"finally","verdict":"approved"}'
+          });
+        }
+        if (systemContent.startsWith("You are the operator model")) {
+          return Promise.resolve({ text: '{"summary":"plan","actions":[]}' });
+        }
+        return Promise.resolve({ text: '{}' });
+      }
+    );
+
+    const result = await runDualAgentSession({
+      prompt: "loop test",
+      maxRounds: 2,
+      mode: "consensus",
+      writer: { provider: "ollama", model: "w" },
+      critic: { provider: "ollama", model: "c" },
+      operator: { provider: "ollama", model: "o" }
+    });
+
+    expect(result.status).toBe("approved");
+    const writerRounds = result.transcript.filter((t) => t.role === "writer").length;
+    expect(writerRounds).toBeGreaterThan(2);
+  });
+
   it("stops at max_rounds when the critic never approves", async () => {
     const { generateText } = await import("./providers.js");
     const { runDualAgentSession } = await import("./runSession.js");
