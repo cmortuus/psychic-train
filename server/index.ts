@@ -387,6 +387,7 @@ function parseSessionRequest(value: unknown): SessionRequest {
     prompt,
     maxRounds,
     ...(typeof value.anonymize === "boolean" ? { anonymize: value.anonymize } : {}),
+    ...(typeof value.usOnly === "boolean" ? { usOnly: value.usOnly } : {}),
     writer: parseProvider(value.writer, "writer"),
     critic: parseProvider(value.critic, "critic"),
     ...(value.operator ? { operator: parseProvider(value.operator, "operator") } : {})

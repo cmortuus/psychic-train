@@ -29,6 +29,7 @@ export type SessionRequest = {
   operator?: ProviderConfig;
   maxRounds: number;
   anonymize?: boolean;
+  usOnly?: boolean;
 };
 
 export type SessionResult = {

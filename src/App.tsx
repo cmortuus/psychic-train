@@ -65,7 +65,7 @@ function countryRank(country: string): number {
 }
 
 const defaultWriterModel = "gpt-oss:20b-cloud";
-const defaultCriticModel = "qwen3-coder:480b-cloud";
+const defaultCriticModel = "gpt-oss:120b-cloud";
 const defaultOperatorModel = "gpt-oss:20b-cloud";
 
 const defaultPrompt = `Build a small TypeScript CLI that reads a markdown task list and outputs completed items in JSON.`;
@@ -101,6 +101,7 @@ export function App() {
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [view, setView] = useState<AppView>("session");
   const [anonymize, setAnonymize] = useState(true);
+  const [usOnly, setUsOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +174,7 @@ export function App() {
       prompt,
       maxRounds,
       anonymize,
+      usOnly,
       writer: normalizeProvider(writer),
       critic: normalizeProvider(critic),
       ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
@@ -259,8 +261,8 @@ export function App() {
           </label>
 
           <div className="stack">
-            <ProviderEditor title="Writer" value={writer} onChange={setWriter} groups={groupedModels} />
-            <ProviderEditor title="Critic" value={critic} onChange={setCritic} groups={groupedModels} />
+            <ProviderEditor title="Writer" value={writer} onChange={setWriter} groups={groupedModels} usOnly={usOnly} />
+            <ProviderEditor title="Critic" value={critic} onChange={setCritic} groups={groupedModels} usOnly={usOnly} />
             <section className="provider-block">
               <div className="provider-header">
                 <h2>Operator</h2>
@@ -274,7 +276,7 @@ export function App() {
                 <span>Enable third model for repo and terminal actions</span>
               </label>
               {enableOperator ? (
-                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} groups={groupedModels} />
+                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} groups={groupedModels} usOnly={false} />
               ) : (
                 <p className="provider-meta">Disabled. The run stops after writer and critic.</p>
               )}
@@ -288,6 +290,15 @@ export function App() {
               onChange={(event) => setAnonymize(event.target.checked)}
             />
             <span>Anonymize paths, emails, git remotes, and secrets in outbound prompts</span>
+          </label>
+
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={usOnly}
+              onChange={(event) => setUsOnly(event.target.checked)}
+            />
+            <span>Keep code on US models only (disables non-US writer/critic)</span>
           </label>
 
           <label>
@@ -340,12 +351,13 @@ export function App() {
           </div>
           <div>
             <span className="muted">Models</span>
-            <strong>
-              {writer.model}
-              {" -> "}
-              {critic.model}
-              {enableOperator ? ` -> ${operator.model}` : ""}
-            </strong>
+            <div className="model-badges">
+              <ModelBadge label="Writer" tag={writer.model} groups={groupedModels} />
+              <ModelBadge label="Critic" tag={critic.model} groups={groupedModels} />
+              {enableOperator ? (
+                <ModelBadge label="Operator" tag={operator.model} groups={groupedModels} />
+              ) : null}
+            </div>
           </div>
         </section>
 
@@ -433,12 +445,14 @@ function ProviderEditor({
   title,
   value,
   onChange,
-  groups
+  groups,
+  usOnly
 }: {
   title: string;
   value: ProviderConfig;
   onChange: (next: ProviderConfig) => void;
   groups: Array<{ country: string; entries: ModelInfo[] }>;
+  usOnly: boolean;
 }) {
   const selected = groups
     .flatMap((group) => group.entries)
@@ -462,15 +476,18 @@ function ProviderEditor({
           onChange={(event) => onChange({ ...value, model: event.target.value })}
         >
           {groups.length === 0 ? <option value="">No models available</option> : null}
-          {groups.map((group) => (
-            <optgroup key={group.country} label={group.country}>
-              {group.entries.map((entry) => (
-                <option key={entry.tag} value={entry.tag}>
-                  {entry.tag} — {entry.country} · {entry.maker}
-                </option>
-              ))}
-            </optgroup>
-          ))}
+          {groups.map((group) => {
+            const groupDisabled = usOnly && group.country !== "US" && group.country !== "Local";
+            return (
+              <optgroup key={group.country} label={groupDisabled ? `${group.country} (disabled)` : group.country}>
+                {group.entries.map((entry) => (
+                  <option key={entry.tag} value={entry.tag} disabled={groupDisabled}>
+                    {entry.tag} — {entry.country} · {entry.maker}
+                  </option>
+                ))}
+              </optgroup>
+            );
+          })}
         </select>
       </label>
 
@@ -499,6 +516,27 @@ function ProviderEditor({
         />
       </label>
     </section>
+  );
+}
+
+function ModelBadge({
+  label,
+  tag,
+  groups
+}: {
+  label: string;
+  tag: string;
+  groups: Array<{ country: string; entries: ModelInfo[] }>;
+}) {
+  const info = groups.flatMap((g) => g.entries).find((entry) => entry.tag === tag);
+  const country = info?.country || (tag.includes(":cloud") ? "Unknown" : "Local");
+  const nonUs = country !== "US" && country !== "Local" && country !== "Unknown";
+  return (
+    <span className={`model-badge ${nonUs ? "non-us" : ""}`}>
+      <span className="model-badge-label">{label}</span>
+      <span className="model-badge-country">{country}</span>
+      <code>{tag}</code>
+    </span>
   );
 }
 
