@@ -38,7 +38,7 @@ type SessionResponse = {
   };
 };
 
-type ModelInfo = { tag: string; country: string; maker: string };
+type ModelInfo = { tag: string; country: string; maker: string; abliterated?: boolean };
 
 const curatedModels: ModelInfo[] = [
   { tag: "gpt-oss:20b-cloud", country: "US", maker: "OpenAI" },
@@ -48,6 +48,20 @@ const curatedModels: ModelInfo[] = [
   { tag: "kimi-k2:1t-cloud", country: "China", maker: "Moonshot" },
   { tag: "glm-4.6:cloud", country: "China", maker: "Zhipu AI" }
 ];
+
+const ABLITERATED_ENV_TAGS: string[] = (() => {
+  try {
+    const raw = (import.meta as { env?: Record<string, string> }).env?.VITE_ABLITERATED_MODELS;
+    return raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+})();
+
+function isAbliterated(tag: string, info?: ModelInfo): boolean {
+  if (info?.abliterated) return true;
+  return ABLITERATED_ENV_TAGS.includes(tag);
+}
 
 const COUNTRY_ORDER: Record<string, number> = {
   US: 0,
@@ -480,11 +494,15 @@ function ProviderEditor({
             const groupDisabled = usOnly && group.country !== "US" && group.country !== "Local";
             return (
               <optgroup key={group.country} label={groupDisabled ? `${group.country} (disabled)` : group.country}>
-                {group.entries.map((entry) => (
-                  <option key={entry.tag} value={entry.tag} disabled={groupDisabled}>
-                    {entry.tag} — {entry.country} · {entry.maker}
-                  </option>
-                ))}
+                {group.entries.map((entry) => {
+                  const abliterated = isAbliterated(entry.tag, entry);
+                  const suffix = abliterated ? " · abliterated" : "";
+                  return (
+                    <option key={entry.tag} value={entry.tag} disabled={groupDisabled}>
+                      {entry.tag} — {entry.country} · {entry.maker}{suffix}
+                    </option>
+                  );
+                })}
               </optgroup>
             );
           })}
@@ -531,11 +549,13 @@ function ModelBadge({
   const info = groups.flatMap((g) => g.entries).find((entry) => entry.tag === tag);
   const country = info?.country || (tag.includes(":cloud") ? "Unknown" : "Local");
   const nonUs = country !== "US" && country !== "Local" && country !== "Unknown";
+  const abliterated = isAbliterated(tag, info);
   return (
     <span className={`model-badge ${nonUs ? "non-us" : ""}`}>
       <span className="model-badge-label">{label}</span>
       <span className="model-badge-country">{country}</span>
       <code>{tag}</code>
+      {abliterated ? <span className="model-badge-abliterated" title="Refusal direction orthogonalized">abliterated</span> : null}
     </span>
   );
 }
