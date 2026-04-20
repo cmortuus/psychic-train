@@ -27,7 +27,8 @@ export type AutopilotStatus =
   | "budget_exhausted"
   | "shell_disabled"
   | "cancelled"
-  | "failed";
+  | "failed"
+  | "test_timeout";
 
 export type AutopilotResult = {
   status: AutopilotStatus;
@@ -131,6 +132,8 @@ export async function runAutopilot(
   const cap = maxIterations(request);
   let lastTestResult: TestRunResult | undefined;
   let lastFinalCode = "";
+  let consecutiveTimeouts = 0;
+  const MAX_CONSECUTIVE_TIMEOUTS = 2;
   let lastFinalFiles: Array<{ path: string; content: string }> = [];
 
   for (let iteration = 1; iteration <= cap; iteration += 1) {
@@ -199,6 +202,25 @@ export async function runAutopilot(
     const testResult = await runTests(workspace, signal);
     lastTestResult = testResult;
     hooks.onTestResult?.(testResult);
+
+    if (testResult.timedOut) {
+      consecutiveTimeouts += 1;
+      const msg = `Tests timed out (attempt ${consecutiveTimeouts}/${MAX_CONSECUTIVE_TIMEOUTS}). Consider raising SHELL_TIMEOUT_MS or fixing the test command.`;
+      hooks.onNote?.(msg);
+      if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+        hooks.onIterationComplete?.(iteration);
+        return {
+          status: "test_timeout",
+          iterations: iteration,
+          finalCode: lastFinalCode,
+          finalFiles: lastFinalFiles,
+          lastTestResult: testResult,
+          reason: `Tests timed out ${consecutiveTimeouts} iterations in a row.`
+        };
+      }
+    } else {
+      consecutiveTimeouts = 0;
+    }
 
     if (testResult.passed) {
       const commitMessage = `autopilot: ${request.prompt.slice(0, 80).replace(/\s+/g, " ")} [iter ${iteration}]`;

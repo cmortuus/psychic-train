@@ -111,6 +111,66 @@ describe("runAutopilot", () => {
     expect(events).toContain("commit");
   }, 60_000);
 
+  it("bails with test_timeout after consecutive test timeouts", async () => {
+    process.env.ALLOW_SHELL_EXEC = "true";
+    process.env.SHELL_ALLOWLIST = "node,npm";
+    process.env.SHELL_TIMEOUT_MS = "200";
+    process.env.AUTOPILOT_MAX_ITERATIONS = "5";
+
+    // Hanging test command so runTests always times out.
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "tmp",
+        private: true,
+        scripts: { test: "node -e \"setTimeout(() => {}, 60_000)\"" }
+      })
+    );
+
+    const { generateText } = await import("./providers.js");
+    const generate = generateText as unknown as ReturnType<typeof vi.fn>;
+    generate.mockReset();
+    generate.mockImplementation((_provider: unknown, messages: Array<{ role: string; content: string }>) => {
+      const systemContent = messages.find((m) => m.role === "system")?.content || "";
+      if (systemContent.startsWith("You are the writing")) {
+        const pkg = {
+          name: "tmp",
+          private: true,
+          scripts: { test: "node -e \"setTimeout(() => {}, 60_000)\"" }
+        };
+        return Promise.resolve({
+          text: JSON.stringify({
+            summary: "hangs",
+            code: JSON.stringify(pkg),
+            files: [{ path: "package.json", content: JSON.stringify(pkg) }]
+          })
+        });
+      }
+      if (systemContent.includes("harsh, adversarial code reviewer")) {
+        return Promise.resolve({ text: JSON.stringify({ summary: "ok", verdict: "approved" }) });
+      }
+      return Promise.resolve({ text: "{}" });
+    });
+
+    const { runAutopilot } = await import("./autopilot.js");
+    const notes: string[] = [];
+    const result = await runAutopilot(
+      {
+        prompt: "hang forever",
+        workspaceRoot: dir,
+        writer: { provider: "ollama", model: "w" },
+        critic: { provider: "ollama", model: "c" }
+      },
+      { onNote: (m) => notes.push(m) }
+    );
+
+    expect(result.status).toBe("test_timeout");
+    // Two consecutive timeouts trip the bail, so we should not exhaust
+    // the full AUTOPILOT_MAX_ITERATIONS=5.
+    expect(result.iterations).toBe(2);
+    expect(notes.some((n) => /timed out/i.test(n))).toBe(true);
+  }, 60_000);
+
   it("returns budget_exhausted when tests never pass", async () => {
     process.env.ALLOW_SHELL_EXEC = "true";
     process.env.SHELL_ALLOWLIST = "node,npm";
