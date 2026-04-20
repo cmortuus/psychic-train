@@ -398,8 +398,8 @@ function parseSessionRequest(value: unknown): SessionRequest {
     throw new Error("Invalid request: prompt is required");
   }
 
-  if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 8) {
-    throw new Error("Invalid request: maxRounds must be an integer between 1 and 8");
+  if (!Number.isInteger(maxRounds) || maxRounds < 1) {
+    throw new Error("Invalid request: maxRounds must be an integer >= 1");
   }
 
   return {

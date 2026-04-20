@@ -491,7 +491,6 @@ export function App() {
                 <input
                   type="number"
                   min={1}
-                  max={mode === "consensus" ? 99 : 8}
                   value={minRounds}
                   onChange={(event) => {
                     const next = Number(event.target.value) || 1;
@@ -508,7 +507,6 @@ export function App() {
                 <input
                   type="number"
                   min={1}
-                  max={8}
                   value={maxRounds}
                   onChange={(event) => setMaxRounds(Number(event.target.value))}
                   disabled={mode === "consensus"}
