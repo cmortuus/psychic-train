@@ -94,7 +94,7 @@ function runOllamaCommand(
   }
 
   return new Promise((resolve, reject) => {
-    const child = spawn("ollama", ["run", model, "--format", "json", "--hidethinking", "--think=false", "--nowordwrap"], {
+    const child = spawn("ollama", ["run", model, "--format", "json", "--hidethinking", "--nowordwrap"], {
       env,
       stdio: ["pipe", "pipe", "pipe"]
     });
