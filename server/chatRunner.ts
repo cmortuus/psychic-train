@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractJsonObject, tryParseJson } from "./jsonExtract.js";
 import { preflightDaemons } from "./ollamaApi.js";
 import { CancelledError, generateText } from "./providers.js";
 import { runDualAgentSession } from "./runSession.js";
@@ -164,9 +165,11 @@ async function runToolWithDelegate(
 }
 
 function parseToolCall(rawText: string): ToolCall {
-  const jsonText = extractJsonObject(rawText.trim());
-  const parsed = JSON.parse(jsonText);
-  return toolCallSchema.parse(parsed);
+  // Use the shared lenient parser so the operator gets jsonrepair +
+  // multi-candidate fallbacks for free, same as writer/critic.
+  const result = tryParseJson(rawText, toolCallSchema);
+  if (result.ok) return result.value;
+  throw new Error(`Operator reply could not be parsed: ${result.reason}`);
 }
 
 function renderMessage(message: ChatMessage): string {
@@ -182,30 +185,6 @@ function renderMessage(message: ChatMessage): string {
 function formatToolResult(call: ToolCall, summary: string, detail?: string): string {
   const head = `[${call.type}] ${summary}`;
   return detail ? `${head}\n${detail}` : head;
-}
-
-function extractJsonObject(text: string): string {
-  const start = text.indexOf("{");
-  if (start === -1) throw new Error("Operator reply did not contain JSON.");
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i += 1) {
-    const c = text[i];
-    if (inString) {
-      if (escaped) { escaped = false; continue; }
-      if (c === "\\") { escaped = true; continue; }
-      if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') { inString = true; continue; }
-    if (c === "{") { depth += 1; continue; }
-    if (c === "}") {
-      depth -= 1;
-      if (depth === 0) return text.slice(start, i + 1);
-    }
-  }
-  throw new Error("Operator reply JSON was not complete.");
 }
 
 export const _testing = { extractJsonObject, parseToolCall: (t: string) => parseToolCall(t) };
