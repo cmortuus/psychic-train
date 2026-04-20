@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ProviderKind = "ollama";
 
@@ -34,21 +34,18 @@ type SessionResponse = {
   };
 };
 
-type ModelOption = {
-  value: string;
-  label: string;
-  maker: string;
-  runtimeModel: string;
-};
-
-const modelOptions: ModelOption[] = [
-  { value: "gpt-oss", label: "gpt-oss", maker: "OpenAI", runtimeModel: "gpt-oss:20b-cloud" },
-  { value: "gemma3", label: "gemma3", maker: "Google", runtimeModel: "gemma3:12b-cloud" },
-  { value: "gemma4", label: "gemma4", maker: "Google DeepMind / Google", runtimeModel: "gemma4:31b-cloud" },
-  { value: "gemini-3-flash-preview", label: "gemini-3-flash-preview", maker: "Google", runtimeModel: "gemini-3-flash-preview:cloud" },
-  { value: "nemotron-3-nano", label: "nemotron-3-nano", maker: "NVIDIA", runtimeModel: "nemotron-3-nano:30b-cloud" },
-  { value: "rnj-1", label: "rnj-1", maker: "Essential AI", runtimeModel: "rnj-1:8b-cloud" }
+const curatedCloudModels = [
+  "gpt-oss:20b-cloud",
+  "gpt-oss:120b-cloud",
+  "deepseek-v3.1:671b-cloud",
+  "qwen3-coder:480b-cloud",
+  "kimi-k2:1t-cloud",
+  "glm-4.6:cloud"
 ];
+
+const defaultWriterModel = "gpt-oss:20b-cloud";
+const defaultCriticModel = "qwen3-coder:480b-cloud";
+const defaultOperatorModel = "gpt-oss:20b-cloud";
 
 const defaultPrompt = `Build a small TypeScript CLI that reads a markdown task list and outputs completed items in JSON.`;
 
@@ -57,26 +54,51 @@ export function App() {
   const [maxRounds, setMaxRounds] = useState(4);
   const [writer, setWriter] = useState<ProviderConfig>({
     provider: "ollama",
-    model: "gpt-oss",
+    model: defaultWriterModel,
     baseUrl: "http://127.0.0.1:11434",
     apiKey: ""
   });
   const [critic, setCritic] = useState<ProviderConfig>({
     provider: "ollama",
-    model: "gemini-3-flash-preview",
+    model: defaultCriticModel,
     baseUrl: "http://127.0.0.1:11434",
     apiKey: ""
   });
   const [enableOperator, setEnableOperator] = useState(true);
   const [operator, setOperator] = useState<ProviderConfig>({
     provider: "ollama",
-    model: "rnj-1",
+    model: defaultOperatorModel,
     baseUrl: "http://127.0.0.1:11434",
     apiKey: ""
   });
   const [result, setResult] = useState<SessionResponse | null>(null);
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [localModels, setLocalModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/models")
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { models?: string[] };
+        if (!cancelled && Array.isArray(data.models)) {
+          setLocalModels(data.models);
+        }
+      })
+      .catch(() => {
+        // Daemon unreachable — silent fallback to curated list.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const availableModels = useMemo(() => {
+    return Array.from(new Set([...curatedCloudModels, ...localModels])).sort();
+  }, [localModels]);
 
   const statusLabel = useMemo(() => {
     if (!result) {
@@ -142,8 +164,8 @@ export function App() {
           </label>
 
           <div className="stack">
-            <ProviderEditor title="Writer" value={writer} onChange={setWriter} />
-            <ProviderEditor title="Critic" value={critic} onChange={setCritic} />
+            <ProviderEditor title="Writer" value={writer} onChange={setWriter} models={availableModels} />
+            <ProviderEditor title="Critic" value={critic} onChange={setCritic} models={availableModels} />
             <section className="provider-block">
               <div className="provider-header">
                 <h2>Operator</h2>
@@ -157,7 +179,7 @@ export function App() {
                 <span>Enable third model for repo and terminal actions</span>
               </label>
               {enableOperator ? (
-                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} />
+                <ProviderEditor title="Operator model" value={operator} onChange={setOperator} models={availableModels} />
               ) : (
                 <p className="provider-meta">Disabled. The run stops after writer and critic.</p>
               )}
@@ -190,10 +212,10 @@ export function App() {
           <div>
             <span className="muted">Models</span>
             <strong>
-              {getRuntimeModel(writer.model)}
+              {writer.model}
               {" -> "}
-              {getRuntimeModel(critic.model)}
-              {enableOperator ? ` -> ${getRuntimeModel(operator.model)}` : ""}
+              {critic.model}
+              {enableOperator ? ` -> ${operator.model}` : ""}
             </strong>
           </div>
         </section>
@@ -263,13 +285,15 @@ export function App() {
 function ProviderEditor({
   title,
   value,
-  onChange
+  onChange,
+  models
 }: {
   title: string;
   value: ProviderConfig;
   onChange: (next: ProviderConfig) => void;
+  models: string[];
 }) {
-  const selectedModel = modelOptions.find((option) => option.value === value.model);
+  const datalistId = `models-${title.replace(/\s+/g, "-").toLowerCase()}`;
 
   return (
     <section className="provider-block">
@@ -284,22 +308,22 @@ function ProviderEditor({
 
       <label>
         Model
-        <select
+        <input
+          type="text"
+          list={datalistId}
           value={value.model}
           onChange={(event) => onChange({ ...value, model: event.target.value })}
-        >
-          {modelOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label} - {option.maker}
-            </option>
+          placeholder="e.g. gpt-oss:20b-cloud"
+        />
+        <datalist id={datalistId}>
+          {models.map((model) => (
+            <option key={model} value={model} />
           ))}
-        </select>
+        </datalist>
       </label>
 
       <p className="provider-meta">
-        Maker: {selectedModel?.maker || "Unknown"}.
-        {" "}
-        Invoked as <code>{`ollama run ${selectedModel?.runtimeModel || value.model}`}</code>.
+        Invoked as <code>{`ollama run ${value.model || "<model>"}`}</code>.
       </p>
 
       <label>
@@ -326,16 +350,10 @@ function ProviderEditor({
 }
 
 function normalizeProvider(provider: ProviderConfig) {
-  const runtimeModel = getRuntimeModel(provider.model);
-
   return {
     provider: provider.provider,
-    model: runtimeModel,
+    model: provider.model.trim(),
     ...(provider.baseUrl.trim() ? { baseUrl: provider.baseUrl.trim() } : {}),
     ...(provider.apiKey.trim() ? { apiKey: provider.apiKey.trim() } : {})
   };
-}
-
-function getRuntimeModel(label: string) {
-  return modelOptions.find((option) => option.value === label)?.runtimeModel || label.trim();
 }

@@ -1,7 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { logError, logInfo } from "./logger.js";
-import { DaemonUnreachableError } from "./ollamaApi.js";
+import { DaemonUnreachableError, fetchOllamaTags } from "./ollamaApi.js";
 import { runDualAgentSession } from "./runSession.js";
 import { serveStatic } from "./static.js";
 import { ProviderConfig, SessionRequest } from "./types.js";
@@ -42,6 +42,37 @@ const server = createServer(async (req, res) => {
       durationMs: Date.now() - startedAt
     });
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "GET" && req.url && req.url.startsWith("/api/models")) {
+    const baseUrl =
+      new URL(req.url, "http://x").searchParams.get("baseUrl") ||
+      process.env.OLLAMA_BASE_URL ||
+      "http://127.0.0.1:11434";
+    try {
+      const tags = await fetchOllamaTags(baseUrl);
+      const models = tags.map((tag) => tag.name).sort();
+      logInfo("http.request", {
+        method: req.method,
+        path: req.url,
+        status: 200,
+        durationMs: Date.now() - startedAt
+      });
+      sendJson(res, 200, { models, baseUrl });
+    } catch (error) {
+      const status = error instanceof DaemonUnreachableError ? 502 : 500;
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const code = error instanceof DaemonUnreachableError ? error.code : undefined;
+      logError("models.error", { status, message, baseUrl });
+      logInfo("http.request", {
+        method: req.method,
+        path: req.url,
+        status,
+        durationMs: Date.now() - startedAt
+      });
+      sendJson(res, status, { error: message, ...(code ? { code } : {}) });
+    }
     return;
   }
 
