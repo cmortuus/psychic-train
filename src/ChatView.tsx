@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { FolderPicker } from "./FolderPicker";
 import { streamAutopilot } from "./sseAutopilot";
 import { streamChat } from "./sseChat";
 
@@ -106,6 +107,7 @@ export function ChatView({
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>(initial?.timeline || []);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef<boolean>(true);
@@ -248,7 +250,7 @@ export function ChatView({
     const trimmed = input.trim();
     if (!trimmed || isRunning) return;
     if (!workspaceRoot) {
-      setError("Autopilot needs a workspace set in the sidebar.");
+      setError("Autopilot needs a workspace — use the “Open folder…” button above.");
       return;
     }
     setInput("");
@@ -348,7 +350,18 @@ export function ChatView({
           </p>
         </div>
         <div className="chat-header-actions">
-          <p className="provider-meta">Workspace: <code>{workspaceRoot || "(default: server cwd)"}</code></p>
+          <p className="provider-meta">
+            Workspace: <code>{workspaceRoot || "(default: server cwd)"}</code>{" "}
+            <button
+              type="button"
+              className="chat-folder-pick"
+              onClick={() => setPickerOpen(true)}
+              disabled={isRunning}
+              title="Open a folder on this machine"
+            >
+              {workspaceRoot ? "Change…" : "Open folder…"}
+            </button>
+          </p>
           <button
             type="button"
             onClick={handleClear}
@@ -358,6 +371,16 @@ export function ChatView({
           </button>
         </div>
       </header>
+      {pickerOpen ? (
+        <FolderPicker
+          initialPath={workspaceRoot}
+          onSelect={(path) => {
+            setWorkspaceRoot(path);
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
 
       <div className="chat-scroll" ref={scrollRef}>
         {timeline.length === 0 ? (
@@ -394,7 +417,7 @@ export function ChatView({
             className="autopilot-button"
             onClick={handleAutopilot}
             disabled={isRunning || !input.trim() || !workspaceRoot}
-            title={workspaceRoot ? "Fully autonomous: scaffold → generate → test → commit" : "Set a workspace in the sidebar first"}
+            title={workspaceRoot ? "Fully autonomous: scaffold → generate → test → commit" : "Open a folder first"}
           >
             ⚡ Autopilot
           </button>
