@@ -548,6 +548,27 @@ button:disabled {
   border-left: 3px solid #85a7ff;
 }
 
+.chat-autopilot {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 215, 0, 0.28);
+  background: rgba(32, 24, 8, 0.72);
+  border-left: 3px solid #ffd166;
+}
+
+.chat-autopilot header {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  color: #ffd166;
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+
+.autopilot-button {
+  background: #ffd166 !important;
+  color: #2b1b04 !important;
+}
+
 .chat-input {
   display: grid;
   gap: 10px;

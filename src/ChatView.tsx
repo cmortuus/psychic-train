@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { streamAutopilot } from "./sseAutopilot";
 import { streamChat } from "./sseChat";
 
 type ProviderConfig = {
@@ -31,7 +32,8 @@ type TimelineEntry =
   | { kind: "tool_call"; call: ToolCall }
   | { kind: "tool_result"; ok: boolean; summary: string; detail?: string }
   | { kind: "workspace"; root: string }
-  | { kind: "delegate"; event: string; summary: string };
+  | { kind: "delegate"; event: string; summary: string }
+  | { kind: "autopilot"; event: string; summary: string };
 
 type DelegateTurn = {
   role: "writer" | "critic" | "operator" | "system";
@@ -221,6 +223,93 @@ export function ChatView({ operator, writer, critic, workspaceRoot, onWorkspaceC
     abortRef.current?.abort();
   }
 
+  async function handleAutopilot() {
+    const trimmed = input.trim();
+    if (!trimmed || isRunning) return;
+    if (!workspaceRoot) {
+      setError("Autopilot needs a workspace set in the sidebar.");
+      return;
+    }
+    setInput("");
+    setError(null);
+    setIsRunning(true);
+    setTimeline((prior) => [...prior, { kind: "user", text: `⚡ Autopilot: ${trimmed}` }]);
+    onDelegateStart?.();
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      await streamAutopilot(
+        {
+          prompt: trimmed,
+          workspaceRoot,
+          writer: normalize(writer),
+          critic: normalize(critic),
+          ...(operator.model ? { operator: normalize(operator) } : {})
+        },
+        (event, data) => {
+          if (event === "iteration_start") {
+            const { iteration } = data as { iteration: number };
+            setTimeline((prior) => [...prior, { kind: "autopilot", event: `iteration ${iteration}`, summary: `Starting iteration ${iteration}` }]);
+            return;
+          }
+          if (event === "session_turn") {
+            onDelegateTurn?.(data as DelegateTurn);
+            return;
+          }
+          if (event === "test_result") {
+            const r = data as { passed: boolean; summary: string };
+            setTimeline((prior) => [
+              ...prior,
+              { kind: "tool_result", ok: r.passed, summary: r.summary, detail: (data as { rawOutput?: string }).rawOutput }
+            ]);
+            return;
+          }
+          if (event === "commit") {
+            const c = data as { message: string; output: string };
+            setTimeline((prior) => [...prior, { kind: "autopilot", event: "commit", summary: c.message }]);
+            return;
+          }
+          if (event === "note") {
+            const n = data as { message: string };
+            setTimeline((prior) => [...prior, { kind: "autopilot", event: "note", summary: n.message }]);
+            return;
+          }
+          if (event === "done") {
+            const r = data as { status: string; iterations: number; committed?: boolean };
+            setTimeline((prior) => [
+              ...prior,
+              {
+                kind: "autopilot",
+                event: `done · ${r.status}`,
+                summary: `Autopilot finished after ${r.iterations} iteration(s)${r.committed ? " · committed" : ""}.`
+              }
+            ]);
+            return;
+          }
+          if (event === "error") {
+            const payload = data as { message?: string };
+            setError(payload.message || "Autopilot failed");
+          }
+          if (event === "cancelled") {
+            setError("Autopilot cancelled.");
+          }
+        },
+        controller.signal
+      );
+    } catch (autoError) {
+      if (autoError instanceof Error && autoError.name === "AbortError") {
+        setError("Autopilot cancelled.");
+      } else {
+        setError(autoError instanceof Error ? autoError.message : "Unknown error");
+      }
+    } finally {
+      setIsRunning(false);
+      abortRef.current = null;
+    }
+  }
+
   return (
     <section className="chat-view">
       <header className="chat-header">
@@ -273,6 +362,15 @@ export function ChatView({ operator, writer, critic, workspaceRoot, onWorkspaceC
         <div className="button-row">
           <button type="submit" disabled={isRunning || !input.trim()}>
             {isRunning ? "Sending..." : "Send"}
+          </button>
+          <button
+            type="button"
+            className="autopilot-button"
+            onClick={handleAutopilot}
+            disabled={isRunning || !input.trim() || !workspaceRoot}
+            title={workspaceRoot ? "Fully autonomous: scaffold → generate → test → commit" : "Set a workspace in the sidebar first"}
+          >
+            ⚡ Autopilot
           </button>
           {isRunning ? (
             <button type="button" className="stop-button" onClick={handleStop}>
@@ -327,6 +425,14 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
     return (
       <article className="chat-delegate">
         <header>delegate · {entry.event}</header>
+        <p>{entry.summary}</p>
+      </article>
+    );
+  }
+  if (entry.kind === "autopilot") {
+    return (
+      <article className="chat-autopilot">
+        <header>autopilot · {entry.event}</header>
         <p>{entry.summary}</p>
       </article>
     );
