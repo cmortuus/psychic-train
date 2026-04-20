@@ -100,6 +100,7 @@ export function App() {
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [view, setView] = useState<AppView>("session");
+  const [anonymize, setAnonymize] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -171,6 +172,7 @@ export function App() {
     const body = {
       prompt,
       maxRounds,
+      anonymize,
       writer: normalizeProvider(writer),
       critic: normalizeProvider(critic),
       ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
@@ -278,6 +280,15 @@ export function App() {
               )}
             </section>
           </div>
+
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={anonymize}
+              onChange={(event) => setAnonymize(event.target.checked)}
+            />
+            <span>Anonymize paths, emails, git remotes, and secrets in outbound prompts</span>
+          </label>
 
           <label>
             Max rounds
