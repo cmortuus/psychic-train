@@ -5,7 +5,7 @@ import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult 
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
-const writerResponseSchema = z.object({
+export const writerResponseSchema = z.object({
   summary: z.string().min(1),
   code: z.string()
 });
@@ -41,7 +41,7 @@ type CriticResponse = {
   required_changes: string[];
 };
 
-const criticResponseSchema = z.object({
+export const criticResponseSchema = z.object({
   summary: z.string().min(1),
   verdict: criticVerdictSchema,
   required_changes: z.array(z.string()).default([])
@@ -75,7 +75,7 @@ const operatorActionSchema = z.object({
   command: z.string().min(1).optional()
 });
 
-const operatorResponseSchema = z.object({
+export const operatorResponseSchema = z.object({
   summary: z.string().min(1),
   actions: z.array(operatorActionSchema).default([])
 });
@@ -382,7 +382,7 @@ function tryParseJson<T>(rawText: string, schema: z.ZodSchema<T>): ParseResult<T
   }
 }
 
-function extractJsonObject(text: string): string {
+export function extractJsonObject(text: string): string {
   const start = text.indexOf("{");
   if (start === -1) {
     throw new Error("Response did not contain a JSON object");
