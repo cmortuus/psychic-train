@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
+import { ChatMessage, ChatRequest, runChatTurn } from "./chatRunner.js";
 import { logError, logInfo } from "./logger.js";
 import { DaemonUnreachableError, fetchOllamaTags } from "./ollamaApi.js";
 import { CancelledError } from "./providers.js";
@@ -218,6 +219,72 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/api/chat/stream") {
+    try {
+      const body = await readJsonBody(req);
+      const parsed = parseChatRequest(body);
+      logInfo("chat.start", {
+        turnMessages: parsed.messages.length,
+        workspace: parsed.workspaceRoot,
+        operatorModel: parsed.operator.model
+      });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.writeHead(200);
+
+      const abortController = new AbortController();
+      const onClientClose = () => abortController.abort();
+      req.on("close", onClientClose);
+
+      const send = (event: string, data: unknown) => {
+        if (!res.writableEnded) {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+      };
+
+      try {
+        const result = await runChatTurn(
+          parsed,
+          {
+            onAssistantMessage(content) { send("assistant_message", { content }); },
+            onToolCall(call) { send("tool_call", call); },
+            onToolResult(r) { send("tool_result", r); },
+            onWorkspaceChange(ws) { send("workspace_changed", { root: ws.root }); },
+            onDelegateEvent(event, data) { send(`delegate_${event}`, data); }
+          },
+          abortController.signal
+        );
+        send("done", { messages: result.messages, workspaceRoot: result.workspaceRoot });
+      } catch (error) {
+        if (error instanceof CancelledError) {
+          send("cancelled", { message: error.message });
+        } else {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          const code = error instanceof DaemonUnreachableError ? error.code : undefined;
+          logError("chat.error", { message, ...(code ? { code } : {}) });
+          send("error", { message, ...(code ? { code } : {}) });
+        }
+      } finally {
+        req.off("close", onClientClose);
+        res.end();
+        logInfo("http.request", {
+          method: req.method,
+          path: req.url,
+          status: 200,
+          durationMs: Date.now() - startedAt
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Invalid request") ? 400 : 500;
+      logError("chat.error", { status, message });
+      sendJson(res, status, { error: message });
+    }
+    return;
+  }
+
   if (req.method === "GET" && !req.url.startsWith("/api/")) {
     res.removeHeader("Content-Type");
     const outcome = await serveStatic(req.url, staticRoot, res);
@@ -341,4 +408,35 @@ function parseProvider(value: unknown, label: string): ProviderConfig {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseChatRequest(value: unknown): ChatRequest {
+  if (!isRecord(value)) {
+    throw new Error("Invalid request: expected an object body");
+  }
+  const messagesRaw = value.messages;
+  if (!Array.isArray(messagesRaw)) {
+    throw new Error("Invalid request: messages must be an array");
+  }
+  const messages: ChatMessage[] = messagesRaw.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`Invalid request: messages[${index}] must be an object`);
+    }
+    const role = entry.role;
+    const content = typeof entry.content === "string" ? entry.content : "";
+    if (role === "user" || role === "system") return { role, content };
+    if (role === "assistant") return { role: "assistant", content };
+    if (role === "tool") return { role: "tool", content, ok: Boolean(entry.ok) };
+    throw new Error(`Invalid request: messages[${index}].role is unknown`);
+  });
+  const workspaceRoot = typeof value.workspaceRoot === "string" && value.workspaceRoot.trim()
+    ? value.workspaceRoot.trim()
+    : process.cwd();
+  return {
+    messages,
+    workspaceRoot,
+    operator: parseProvider(value.operator, "operator"),
+    writer: parseProvider(value.writer, "writer"),
+    critic: parseProvider(value.critic, "critic")
+  };
 }

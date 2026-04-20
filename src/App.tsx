@@ -1,5 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChatView } from "./ChatView";
 import { streamSession } from "./sseSession";
+
+type AppView = "session" | "chat";
 
 type ProviderKind = "ollama";
 
@@ -96,6 +99,7 @@ export function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [view, setView] = useState<AppView>("session");
 
   useEffect(() => {
     let cancelled = false;
@@ -300,6 +304,31 @@ export function App() {
       </aside>
 
       <main className="workspace">
+        <nav className="view-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "session"}
+            className={view === "session" ? "active" : ""}
+            onClick={() => setView("session")}
+          >
+            Session
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "chat"}
+            className={view === "chat" ? "active" : ""}
+            onClick={() => setView("chat")}
+          >
+            Chat
+          </button>
+        </nav>
+
+        {view === "chat" ? (
+          <ChatView operator={operator} writer={writer} critic={critic} />
+        ) : (
+        <>
         <section className="status-bar">
           <div>
             <span className="muted">Session status</span>
@@ -377,6 +406,8 @@ export function App() {
             </div>
           )}
         </section>
+        </>
+        )}
       </main>
     </div>
   );
