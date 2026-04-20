@@ -34,13 +34,23 @@ type TimelineEntry =
   | { kind: "workspace"; root: string }
   | { kind: "delegate"; event: string; summary: string };
 
+type DelegateTurn = {
+  role: "writer" | "critic" | "operator" | "system";
+  round: number;
+  summary: string;
+  code?: string;
+  verdict?: "revise" | "approved";
+};
+
 type Props = {
   operator: ProviderConfig;
   writer: ProviderConfig;
   critic: ProviderConfig;
+  onDelegateTurn?: (turn: DelegateTurn) => void;
+  onDelegateStart?: () => void;
 };
 
-export function ChatView({ operator, writer, critic }: Props) {
+export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateStart }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceRoot, setWorkspaceRoot] = useState("");
   const [input, setInput] = useState("");
@@ -89,7 +99,16 @@ export function ChatView({ operator, writer, critic }: Props) {
             return;
           }
           if (event === "tool_call") {
-            setTimeline((prior) => [...prior, { kind: "tool_call", call: data as ToolCall }]);
+            const call = data as ToolCall;
+            if (call.type === "delegate_coding_task") {
+              onDelegateStart?.();
+              setTimeline((prior) => [
+                ...prior,
+                { kind: "delegate", event: "delegated", summary: call.task }
+              ]);
+              return;
+            }
+            setTimeline((prior) => [...prior, { kind: "tool_call", call }]);
             return;
           }
           if (event === "tool_result") {
@@ -104,11 +123,7 @@ export function ChatView({ operator, writer, critic }: Props) {
             return;
           }
           if (event === "delegate_turn") {
-            const turn = data as { role: string; round: number; summary: string };
-            setTimeline((prior) => [
-              ...prior,
-              { kind: "delegate", event: `${turn.role} · round ${turn.round}`, summary: turn.summary }
-            ]);
+            onDelegateTurn?.(data as DelegateTurn);
             return;
           }
           if (event === "done") {

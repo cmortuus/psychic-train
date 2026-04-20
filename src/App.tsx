@@ -482,7 +482,21 @@ export function App() {
         ) : null}
         {view !== "session" ? (
           <div className="pane chat-pane">
-            <ChatView operator={operator} writer={writer} critic={critic} />
+            <ChatView
+            operator={operator}
+            writer={writer}
+            critic={critic}
+            onDelegateStart={() => {
+              setLiveTranscript([]);
+              setResult(null);
+              setError("");
+              setActiveAgent("writer · round 1");
+            }}
+            onDelegateTurn={(turn) => {
+              setLiveTranscript((prior) => [...prior, turn]);
+              setActiveAgent(`${turn.role} · round ${turn.round}`);
+            }}
+          />
           </div>
         ) : null}
         </div>
