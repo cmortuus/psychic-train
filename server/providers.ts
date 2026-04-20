@@ -15,10 +15,6 @@ export async function generateText(
   config: ProviderConfig,
   messages: ChatMessage[]
 ): Promise<ProviderResponse> {
-  if (config.provider !== "ollama") {
-    throw new Error(`Unsupported provider: ${config.provider}`);
-  }
-
   return callOllama(config, messages);
 }
 
