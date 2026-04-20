@@ -112,10 +112,29 @@ export function App() {
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [localModels, setLocalModels] = useState<string[]>([]);
+  const [serverCatalog, setServerCatalog] = useState<ModelInfo[] | null>(null);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [view, setView] = useState<AppView>("session");
   const [anonymize, setAnonymize] = useState(true);
   const [usOnly, setUsOnly] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/catalog")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as { catalog?: ModelInfo[] };
+        if (!cancelled && Array.isArray(payload.catalog)) {
+          setServerCatalog(payload.catalog);
+        }
+      })
+      .catch(() => {
+        // Fall back to the bundled curated list.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,7 +158,8 @@ export function App() {
 
   const groupedModels = useMemo(() => {
     const seen = new Map<string, ModelInfo>();
-    for (const entry of curatedModels) {
+    const catalog = serverCatalog && serverCatalog.length > 0 ? serverCatalog : curatedModels;
+    for (const entry of catalog) {
       seen.set(entry.tag, entry);
     }
     for (const tag of localModels) {
