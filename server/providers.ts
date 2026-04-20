@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { logDebug } from "./logger.js";
 import { ProviderConfig } from "./types.js";
 
@@ -11,67 +10,9 @@ type ProviderResponse = {
   text: string;
 };
 
-export async function generateText(
-  config: ProviderConfig,
-  messages: ChatMessage[],
-  signal?: AbortSignal
-): Promise<ProviderResponse> {
-  return callOllama(config, messages, signal);
-}
-
-async function callOllama(
-  config: ProviderConfig,
-  messages: ChatMessage[],
-  signal?: AbortSignal
-): Promise<ProviderResponse> {
-  const prompt = buildOllamaPrompt(messages);
-  const env = {
-    ...process.env,
-    ...(config.baseUrl ? { OLLAMA_HOST: config.baseUrl } : {}),
-    ...(config.apiKey ? { OLLAMA_API_KEY: config.apiKey } : {})
-  };
-
-  logDebug("ollama.command.start", {
-    model: config.model,
-    host: config.baseUrl || process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",
-    promptPreview: prompt.replace(/\s+/g, " ").slice(0, 200),
-    apiKey: env.OLLAMA_API_KEY || ""
-  });
-
-  const result = await runOllamaCommand(config.model, prompt, env, signal);
-  const text = result.trim();
-  if (!text) {
-    throw new Error(`Ollama returned an empty response for model ${config.model}`);
-  }
-
-  logDebug("ollama.command.complete", {
-    model: config.model,
-    outputPreview: text.replace(/\s+/g, " ").slice(0, 200)
-  });
-
-  return { text };
-}
-
-function buildOllamaPrompt(messages: ChatMessage[]): string {
-  return messages
-    .map((message) => {
-      const role = message.role.toUpperCase();
-      return `${role}:\n${message.content.trim()}`;
-    })
-    .join("\n\n");
-}
-
-const DEFAULT_OLLAMA_TIMEOUT_MS = 180_000;
-const KILL_GRACE_MS = 3_000;
-
-function ollamaTimeoutMs(): number {
-  const raw = process.env.OLLAMA_TIMEOUT_MS;
-  if (!raw) {
-    return DEFAULT_OLLAMA_TIMEOUT_MS;
-  }
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OLLAMA_TIMEOUT_MS;
-}
+const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+const DEFAULT_GENERATE_TIMEOUT_MS = 180_000;
+const DEFAULT_NUM_PREDICT = 4096;
 
 export class CancelledError extends Error {
   readonly code = "cancelled";
@@ -81,91 +22,108 @@ export class CancelledError extends Error {
   }
 }
 
-function runOllamaCommand(
-  model: string,
-  prompt: string,
-  env: NodeJS.ProcessEnv,
+export async function generateText(
+  config: ProviderConfig,
+  messages: ChatMessage[],
   signal?: AbortSignal
-): Promise<string> {
-  const timeoutMs = ollamaTimeoutMs();
+): Promise<ProviderResponse> {
+  if (config.provider !== "ollama") {
+    throw new Error(`Unsupported provider: ${config.provider}`);
+  }
+  return callOllamaHttp(config, messages, signal);
+}
 
-  if (signal?.aborted) {
-    return Promise.reject(new CancelledError());
+function ollamaTimeoutMs(): number {
+  const raw = process.env.OLLAMA_TIMEOUT_MS;
+  if (!raw) return DEFAULT_GENERATE_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GENERATE_TIMEOUT_MS;
+}
+
+function numPredict(): number {
+  const raw = process.env.OLLAMA_NUM_PREDICT;
+  if (!raw) return DEFAULT_NUM_PREDICT;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_NUM_PREDICT;
+}
+
+async function callOllamaHttp(
+  config: ProviderConfig,
+  messages: ChatMessage[],
+  signal?: AbortSignal
+): Promise<ProviderResponse> {
+  if (signal?.aborted) throw new CancelledError();
+
+  const baseUrl =
+    (config.baseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, "");
+
+  const body = {
+    model: config.model,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    stream: false,
+    think: false,
+    options: {
+      num_predict: numPredict()
+    }
+  };
+
+  logDebug("ollama.http.start", {
+    model: config.model,
+    host: baseUrl,
+    messageCount: messages.length,
+    numPredict: body.options.num_predict
+  });
+
+  const timeout = ollamaTimeoutMs();
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error(`timeout-${timeout}`)), timeout);
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}) },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (signal?.aborted) throw new CancelledError();
+    if (error instanceof Error && /timeout-/.test(error.message)) {
+      throw new Error(`ollama ${config.model} timed out after ${timeout}ms`);
+    }
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 
-  return new Promise((resolve, reject) => {
-    const child = spawn("ollama", ["run", model, "--hidethinking", "--nowordwrap"], {
-      env,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+  if (!response.ok) {
+    const bodyText = await response.text().catch(() => "");
+    throw new Error(`ollama ${config.model} HTTP ${response.status}: ${bodyText.slice(0, 300) || response.statusText}`);
+  }
 
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let cancelled = false;
+  const payload = (await response.json()) as {
+    message?: { content?: string };
+    error?: string;
+    done_reason?: string;
+  };
 
-    const onAbort = () => {
-      cancelled = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }, KILL_GRACE_MS).unref();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
+  if (payload.error) {
+    throw new Error(`ollama ${config.model} error: ${payload.error}`);
+  }
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }, KILL_GRACE_MS).unref();
-    }, timeoutMs);
+  const text = (payload.message?.content || "").trim();
+  if (!text) {
+    throw new Error(`Ollama returned an empty response for model ${config.model} (done_reason=${payload.done_reason || "unknown"})`);
+  }
 
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk: Buffer | string) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      if ("code" in error && error.code === "ENOENT") {
-        reject(new Error("`ollama` is not installed or not available on PATH"));
-        return;
-      }
-
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      if (cancelled) {
-        reject(new CancelledError());
-        return;
-      }
-      if (timedOut) {
-        reject(new Error(`ollama run ${model} timed out after ${timeoutMs}ms`));
-        return;
-      }
-
-      if (code !== 0) {
-        const detail = stderr.trim() || stdout.trim() || `exit code ${code}`;
-        reject(new Error(`ollama run ${model} failed: ${detail}`));
-        return;
-      }
-
-      resolve(stdout);
-    });
-
-    child.stdin.write(prompt);
-    child.stdin.end();
+  logDebug("ollama.http.complete", {
+    model: config.model,
+    length: text.length,
+    doneReason: payload.done_reason || "unknown"
   });
+
+  return { text };
 }

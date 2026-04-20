@@ -53,12 +53,12 @@ async function resolveTestCommand(workspace: Workspace, projectType: ProjectType
       try {
         const pkg = JSON.parse(await readFile(join(workspace.root, "package.json"), "utf8"));
         if (pkg?.scripts?.test) {
-          return { command: "npm", args: ["test", "--silent"] };
+          return { command: "npm", args: ["test"] };
         }
       } catch {
-        // ignore
+        // package.json present but unparseable — still try npm test and let npm report the error.
       }
-      return { command: "npm", args: ["test", "--silent"] };
+      return { command: "npm", args: ["test"] };
     }
     case "python":
       return { command: "pytest", args: [] };
