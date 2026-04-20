@@ -30,6 +30,7 @@ export type SessionRequest = {
   critic: ProviderConfig;
   operator?: ProviderConfig;
   maxRounds: number;
+  minRounds?: number;
   anonymize?: boolean;
   usOnly?: boolean;
   mode?: SessionMode;

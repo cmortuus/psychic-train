@@ -122,6 +122,7 @@ export function App() {
   const [anonymize, setAnonymize] = useState(true);
   const [usOnly, setUsOnly] = useState(false);
   const [mode, setMode] = useState<"writer_critic" | "consensus">("writer_critic");
+  const [minRounds, setMinRounds] = useState(1);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("psychic-train:sidebar-collapsed") === "true";
@@ -246,6 +247,7 @@ export function App() {
     const body = {
       prompt,
       maxRounds,
+      minRounds,
       anonymize,
       usOnly,
       mode,
@@ -426,20 +428,36 @@ export function App() {
               </select>
             </label>
 
-            <label>
-              Max rounds{" "}
-              {mode === "consensus" ? (
-                <span className="provider-meta">(ignored in consensus — Stop to end)</span>
-              ) : null}
-              <input
-                type="number"
-                min={1}
-                max={8}
-                value={maxRounds}
-                onChange={(event) => setMaxRounds(Number(event.target.value))}
-                disabled={mode === "consensus"}
-              />
-            </label>
+            <div className="round-range">
+              <label>
+                Min rounds
+                <input
+                  type="number"
+                  min={1}
+                  max={mode === "consensus" ? 99 : 8}
+                  value={minRounds}
+                  onChange={(event) => {
+                    const next = Number(event.target.value) || 1;
+                    setMinRounds(next);
+                    if (mode !== "consensus" && next > maxRounds) setMaxRounds(next);
+                  }}
+                />
+              </label>
+              <label>
+                Max rounds{" "}
+                {mode === "consensus" ? (
+                  <span className="provider-meta">(ignored in consensus)</span>
+                ) : null}
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={maxRounds}
+                  onChange={(event) => setMaxRounds(Number(event.target.value))}
+                  disabled={mode === "consensus"}
+                />
+              </label>
+            </div>
 
             <label>
               Task <span className="provider-meta">(for the Session tab — operator drives the Chat tab)</span>

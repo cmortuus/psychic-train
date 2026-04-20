@@ -211,6 +211,42 @@ describe("runDualAgentSession", () => {
     expect(approvalNote.summary).toContain("all approved");
   });
 
+  it("honors minRounds: demotes early approval into a keep-going round", async () => {
+    const { generateText } = await import("./providers.js");
+    const { runDualAgentSession } = await import("./runSession.js");
+    const generate = generateText as unknown as ReturnType<typeof vi.fn>;
+    generate.mockReset();
+
+    generate.mockImplementation(
+      (_provider: unknown, messages: Array<{ role: string; content: string }>) => {
+        const systemContent = messages.find((m) => m.role === "system")?.content || "";
+        if (systemContent.startsWith("You are the writing")) {
+          return Promise.resolve({ text: '{"summary":"draft","code":"x"}' });
+        }
+        if (systemContent.startsWith("You are the critic")) {
+          return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
+        }
+        return Promise.resolve({ text: '{}' });
+      }
+    );
+
+    const result = await runDualAgentSession({
+      prompt: "do it",
+      maxRounds: 6,
+      minRounds: 3,
+      writer: { provider: "ollama", model: "w" },
+      critic: { provider: "ollama", model: "c" }
+    });
+
+    expect(result.status).toBe("approved");
+    const writerRounds = result.transcript.filter((t) => t.role === "writer").length;
+    expect(writerRounds).toBe(3);
+    const belowMinNotes = result.transcript.filter(
+      (t) => t.role === "system" && t.summary.includes("below minRounds")
+    ).length;
+    expect(belowMinNotes).toBe(2);
+  });
+
   it("consensus mode runs past maxRounds until everyone approves", async () => {
     const { generateText } = await import("./providers.js");
     const { runDualAgentSession } = await import("./runSession.js");

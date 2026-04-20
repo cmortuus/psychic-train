@@ -405,6 +405,9 @@ function parseSessionRequest(value: unknown): SessionRequest {
   return {
     prompt,
     maxRounds,
+    ...(Number.isInteger(value.minRounds) && (value.minRounds as number) >= 1
+      ? { minRounds: value.minRounds as number }
+      : {}),
     ...(typeof value.anonymize === "boolean" ? { anonymize: value.anonymize } : {}),
     ...(typeof value.usOnly === "boolean" ? { usOnly: value.usOnly } : {}),
     ...(value.mode === "consensus" || value.mode === "writer_critic" ? { mode: value.mode } : {}),

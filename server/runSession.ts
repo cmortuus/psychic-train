@@ -201,6 +201,7 @@ export async function runDualAgentSession(
   };
 
   const consensusMode = request.mode === "consensus" && Boolean(request.operator);
+  const minRounds = Math.max(1, request.minRounds || 1);
   let round = 0;
   while (true) {
     round += 1;
@@ -326,6 +327,19 @@ export async function runDualAgentSession(
           ];
           continue;
         }
+      }
+
+      if (round < minRounds) {
+        const note = `[min rounds] Reviewers approved, but the session requires at least ${minRounds} rounds; propose any remaining improvements and keep iterating.`;
+        pendingChanges = [note, ...(criticData.required_changes ?? [])];
+        const keepGoing: AgentTurn = {
+          role: "system",
+          round,
+          summary: `Approved but below minRounds (${round}/${minRounds}); continuing.`
+        };
+        transcript.push(keepGoing);
+        hooks.onTurn?.(keepGoing);
+        continue;
       }
 
       operatorPlan = request.operator
