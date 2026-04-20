@@ -164,7 +164,7 @@ export async function executeTool(
       };
     }
     case "read_file": {
-      const absolute = assertPathInsideWorkspace(workspace, call.path);
+      const absolute = await assertPathInsideWorkspace(workspace, call.path);
       const buf = await readFile(absolute);
       if (buf.byteLength > MAX_FILE_READ_BYTES) {
         return {
@@ -185,7 +185,7 @@ export async function executeTool(
           summary: `Refused: content exceeds ${MAX_FILE_WRITE_BYTES} bytes.`
         };
       }
-      const absolute = assertPathInsideWorkspace(workspace, call.path);
+      const absolute = await assertPathInsideWorkspace(workspace, call.path);
       await mkdir(dirname(absolute), { recursive: true });
       await writeFile(absolute, call.content, "utf8");
       return {
@@ -194,7 +194,7 @@ export async function executeTool(
       };
     }
     case "list_dir": {
-      const absolute = assertPathInsideWorkspace(workspace, call.path || ".");
+      const absolute = await assertPathInsideWorkspace(workspace, call.path || ".");
       const entries = await readdir(absolute, { withFileTypes: true });
       const listing = entries
         .map((entry) => `${entry.isDirectory() ? "d" : "f"} ${entry.name}`)
