@@ -4,7 +4,7 @@ import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult 
 
 const writerResponseSchema = z.object({
   summary: z.string().min(1),
-  code: z.string().min(1)
+  code: z.string()
 });
 
 const criticVerdictSchema: z.ZodType<"revise" | "approved", z.ZodTypeDef, unknown> = z.preprocess((value) => {
