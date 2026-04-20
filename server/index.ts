@@ -220,6 +220,10 @@ const server = createServer(async (req, res) => {
               logError("session.parse_failure", details);
               send("parse_failure", details);
             },
+            onRefusalFallback(details) {
+              logInfo("session.refusal_fallback", details);
+              send("refusal_fallback", details);
+            },
             onFilesMaterialized(details) {
               logInfo("session.files_materialized", {
                 writtenCount: details.written.length,
@@ -581,11 +585,19 @@ function parseProvider(value: unknown, label: string): ProviderConfig {
     }
   }
 
+  const fallbacks = Array.isArray(value.fallbacks)
+    ? value.fallbacks
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    : undefined;
+
   return {
     provider,
     model,
     ...(baseUrl ? { baseUrl } : {}),
-    ...(apiKey ? { apiKey } : {})
+    ...(apiKey ? { apiKey } : {}),
+    ...(fallbacks && fallbacks.length > 0 ? { fallbacks } : {})
   };
 }
 
