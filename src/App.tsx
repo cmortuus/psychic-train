@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ChatView } from "./ChatView";
+import { FolderPicker } from "./FolderPicker";
 import { streamSession } from "./sseSession";
 
 type AppView = "session" | "split" | "chat";
@@ -125,11 +126,25 @@ export function App() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("psychic-train:sidebar-collapsed") === "true";
   });
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("psychic-train:workspace") || "";
+  });
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("psychic-train:sidebar-collapsed", sidebarCollapsed ? "true" : "false");
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (workspaceRoot) {
+      window.localStorage.setItem("psychic-train:workspace", workspaceRoot);
+    } else {
+      window.localStorage.removeItem("psychic-train:workspace");
+    }
+  }, [workspaceRoot]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -234,6 +249,7 @@ export function App() {
       anonymize,
       usOnly,
       mode,
+      ...(workspaceRoot ? { workspaceRoot } : {}),
       writer: normalizeProvider(writer),
       critic: normalizeProvider(critic),
       ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
@@ -332,6 +348,32 @@ export function App() {
               Run both agents through Ollama using cloud-tagged models and stop when the
               critic approves or the round cap hits.
             </p>
+
+            <label className="workspace-input">
+              <span>Workspace</span>
+              <div className="workspace-input-row">
+                <input
+                  type="text"
+                  placeholder="/absolute/path (blank = server cwd)"
+                  value={workspaceRoot}
+                  onChange={(event) => setWorkspaceRoot(event.target.value)}
+                />
+                <button type="button" onClick={() => setWorkspacePickerOpen(true)}>Browse…</button>
+              </div>
+              <span className="provider-meta">
+                Active: <code>{workspaceRoot || "(default: server cwd)"}</code>
+              </span>
+            </label>
+            {workspacePickerOpen ? (
+              <FolderPicker
+                initialPath={workspaceRoot}
+                onSelect={(path) => {
+                  setWorkspaceRoot(path);
+                  setWorkspacePickerOpen(false);
+                }}
+                onClose={() => setWorkspacePickerOpen(false)}
+              />
+            ) : null}
 
             <div className="stack">
               <ProviderEditor title="Writer" value={writer} onChange={setWriter} groups={groupedModels} usOnly={usOnly} />
@@ -535,6 +577,8 @@ export function App() {
             operator={operator}
             writer={writer}
             critic={critic}
+            workspaceRoot={workspaceRoot}
+            onWorkspaceChange={setWorkspaceRoot}
             onDelegateStart={() => {
               setLiveTranscript([]);
               setResult(null);

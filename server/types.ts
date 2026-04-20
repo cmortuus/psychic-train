@@ -33,6 +33,7 @@ export type SessionRequest = {
   anonymize?: boolean;
   usOnly?: boolean;
   mode?: SessionMode;
+  workspaceRoot?: string;
 };
 
 export type SessionResult = {

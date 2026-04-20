@@ -558,6 +558,18 @@ button:disabled {
   gap: 8px;
 }
 
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.chat-header-actions code {
+  word-break: break-all;
+}
+
 .workspace-input-row input {
   flex: 1;
 }
