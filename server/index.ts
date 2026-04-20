@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { AutopilotRequest, ShellDisabledError, runAutopilot } from "./autopilot.js";
 import { browseDirectory } from "./browse.js";
 import { executeTool, toolCallSchema } from "./tools.js";
+import { dismissWatchdogItem, startWatchdog, watchdogReport } from "./watchdog.js";
 import { resolveWorkspace } from "./workspace.js";
 import { ChatMessage, ChatRequest, runChatTurn } from "./chatRunner.js";
 import { mergedCatalog } from "./cloudCatalog.js";
@@ -15,6 +16,8 @@ import { ProviderConfig, SessionRequest } from "./types.js";
 
 const port = Number(process.env.PORT || 8787);
 const staticRoot = resolve(process.cwd(), process.env.STATIC_ROOT || "dist");
+
+startWatchdog();
 
 const server = createServer(async (req, res) => {
   const startedAt = Date.now();
@@ -49,6 +52,28 @@ const server = createServer(async (req, res) => {
       durationMs: Date.now() - startedAt
     });
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/api/watchdog/report") {
+    const items = watchdogReport();
+    sendJson(res, 200, { items });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/api/watchdog/dismiss") {
+    try {
+      const body = await readJsonBody(req);
+      if (!isRecord(body) || typeof body.id !== "string" || !body.id) {
+        throw new Error("Invalid request: id is required");
+      }
+      const removed = dismissWatchdogItem(body.id);
+      sendJson(res, 200, { ok: true, removed });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Invalid request") ? 400 : 500;
+      sendJson(res, status, { error: message });
+    }
     return;
   }
 
