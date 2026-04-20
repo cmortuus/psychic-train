@@ -33,7 +33,7 @@ export type SessionRequest = {
 export type SessionResult = {
   transcript: AgentTurn[];
   finalCode: string;
-  status: "approved" | "max_rounds";
+  status: "approved" | "max_rounds" | "cancelled";
   operatorPlan?: {
     summary: string;
     actions: OperatorAction[];

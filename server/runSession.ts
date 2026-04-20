@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { preflightDaemons } from "./ollamaApi.js";
-import { generateText } from "./providers.js";
+import { CancelledError, generateText } from "./providers.js";
 import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult } from "./types.js";
+
+export { CancelledError };
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
@@ -104,7 +106,8 @@ const operatorSystemPrompt = [
 
 export async function runDualAgentSession(
   request: SessionRequest,
-  hooks: SessionHooks = {}
+  hooks: SessionHooks = {},
+  signal?: AbortSignal
 ): Promise<SessionResult> {
   const transcript: AgentTurn[] = [];
   let currentCode = "";
@@ -117,7 +120,26 @@ export async function runDualAgentSession(
     .map((config) => config.baseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL);
   await preflightDaemons(baseUrls);
 
+  const cancelledResult = (): SessionResult => {
+    const cancelledTurn: AgentTurn = {
+      role: "system",
+      round: Math.max(1, transcript.length),
+      summary: "Session cancelled."
+    };
+    transcript.push(cancelledTurn);
+    hooks.onTurn?.(cancelledTurn);
+    return {
+      transcript,
+      finalCode: currentCode,
+      status: "cancelled",
+      ...(operatorPlan ? { operatorPlan } : {})
+    };
+  };
+
   for (let round = 1; round <= request.maxRounds; round += 1) {
+    if (signal?.aborted) {
+      return cancelledResult();
+    }
     const writerPrompt = buildWriterPrompt(request.prompt, currentCode, currentSummary, pendingChanges);
     hooks.onRoundStart?.({
       agent: "writer",
@@ -134,7 +156,8 @@ export async function runDualAgentSession(
       writerResponseSchema,
       "writer",
       round,
-      hooks
+      hooks,
+      signal
     );
     hooks.onRoundComplete?.({
       agent: "writer",
@@ -170,7 +193,8 @@ export async function runDualAgentSession(
       criticResponseSchema,
       "critic",
       round,
-      hooks
+      hooks,
+      signal
     )) as CriticResponse;
     hooks.onRoundComplete?.({
       agent: "critic",
@@ -190,7 +214,7 @@ export async function runDualAgentSession(
 
     if (criticData.verdict === "approved") {
       operatorPlan = request.operator
-        ? await runOperatorStage(request, currentCode, round, hooks, transcript)
+        ? await runOperatorStage(request, currentCode, round, hooks, transcript, signal)
         : undefined;
       const systemTurn: AgentTurn = {
         role: "system",
@@ -231,7 +255,8 @@ async function runOperatorStage(
   finalCode: string,
   round: number,
   hooks: SessionHooks,
-  transcript: AgentTurn[]
+  transcript: AgentTurn[],
+  signal?: AbortSignal
 ) {
   if (!request.operator) {
     return undefined;
@@ -255,7 +280,8 @@ async function runOperatorStage(
     operatorResponseSchema,
     "operator",
     round,
-    hooks
+    hooks,
+    signal
   );
   hooks.onRoundComplete?.({
     agent: "operator",
@@ -321,9 +347,10 @@ async function generateStructured<T>(
   schema: z.ZodSchema<T>,
   label: "writer" | "critic" | "operator",
   round: number,
-  hooks: SessionHooks
+  hooks: SessionHooks,
+  signal?: AbortSignal
 ): Promise<T> {
-  const firstRaw = await generateText(provider, messages);
+  const firstRaw = await generateText(provider, messages, signal);
   const firstAttempt = tryParseJson(firstRaw.text, schema);
   if (firstAttempt.ok) {
     return firstAttempt.value;
@@ -348,7 +375,7 @@ async function generateStructured<T>(
     }
   ];
 
-  const retryRaw = await generateText(provider, retryMessages);
+  const retryRaw = await generateText(provider, retryMessages, signal);
   const retryAttempt = tryParseJson(retryRaw.text, schema);
   if (retryAttempt.ok) {
     return retryAttempt.value;

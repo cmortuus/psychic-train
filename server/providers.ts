@@ -13,14 +13,16 @@ type ProviderResponse = {
 
 export async function generateText(
   config: ProviderConfig,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  signal?: AbortSignal
 ): Promise<ProviderResponse> {
-  return callOllama(config, messages);
+  return callOllama(config, messages, signal);
 }
 
 async function callOllama(
   config: ProviderConfig,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  signal?: AbortSignal
 ): Promise<ProviderResponse> {
   const prompt = buildOllamaPrompt(messages);
   const env = {
@@ -36,7 +38,7 @@ async function callOllama(
     apiKey: env.OLLAMA_API_KEY || ""
   });
 
-  const result = await runOllamaCommand(config.model, prompt, env);
+  const result = await runOllamaCommand(config.model, prompt, env, signal);
   const text = result.trim();
   if (!text) {
     throw new Error(`Ollama returned an empty response for model ${config.model}`);
@@ -71,12 +73,25 @@ function ollamaTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OLLAMA_TIMEOUT_MS;
 }
 
+export class CancelledError extends Error {
+  readonly code = "cancelled";
+  constructor() {
+    super("Session cancelled");
+    this.name = "CancelledError";
+  }
+}
+
 function runOllamaCommand(
   model: string,
   prompt: string,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  signal?: AbortSignal
 ): Promise<string> {
   const timeoutMs = ollamaTimeoutMs();
+
+  if (signal?.aborted) {
+    return Promise.reject(new CancelledError());
+  }
 
   return new Promise((resolve, reject) => {
     const child = spawn("ollama", ["run", model, "--format", "json", "--hidethinking", "--think=false", "--nowordwrap"], {
@@ -87,6 +102,18 @@ function runOllamaCommand(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
+
+    const onAbort = () => {
+      cancelled = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }, KILL_GRACE_MS).unref();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -108,6 +135,7 @@ function runOllamaCommand(
 
     child.on("error", (error) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       if ("code" in error && error.code === "ENOENT") {
         reject(new Error("`ollama` is not installed or not available on PATH"));
         return;
@@ -118,6 +146,11 @@ function runOllamaCommand(
 
     child.on("close", (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      if (cancelled) {
+        reject(new CancelledError());
+        return;
+      }
       if (timedOut) {
         reject(new Error(`ollama run ${model} timed out after ${timeoutMs}ms`));
         return;
