@@ -59,11 +59,25 @@ function buildOllamaPrompt(messages: ChatMessage[]): string {
     .join("\n\n");
 }
 
+const DEFAULT_OLLAMA_TIMEOUT_MS = 180_000;
+const KILL_GRACE_MS = 3_000;
+
+function ollamaTimeoutMs(): number {
+  const raw = process.env.OLLAMA_TIMEOUT_MS;
+  if (!raw) {
+    return DEFAULT_OLLAMA_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OLLAMA_TIMEOUT_MS;
+}
+
 function runOllamaCommand(
   model: string,
   prompt: string,
   env: NodeJS.ProcessEnv
 ): Promise<string> {
+  const timeoutMs = ollamaTimeoutMs();
+
   return new Promise((resolve, reject) => {
     const child = spawn("ollama", ["run", model, "--format", "json", "--hidethinking", "--think=false", "--nowordwrap"], {
       env,
@@ -72,6 +86,17 @@ function runOllamaCommand(
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }, KILL_GRACE_MS).unref();
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer | string) => {
       stdout += chunk.toString();
@@ -82,6 +107,7 @@ function runOllamaCommand(
     });
 
     child.on("error", (error) => {
+      clearTimeout(timer);
       if ("code" in error && error.code === "ENOENT") {
         reject(new Error("`ollama` is not installed or not available on PATH"));
         return;
@@ -91,6 +117,12 @@ function runOllamaCommand(
     });
 
     child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`ollama run ${model} timed out after ${timeoutMs}ms`));
+        return;
+      }
+
       if (code !== 0) {
         const detail = stderr.trim() || stdout.trim() || `exit code ${code}`;
         reject(new Error(`ollama run ${model} failed: ${detail}`));
