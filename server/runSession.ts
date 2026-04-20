@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { preflightDaemons } from "./ollamaApi.js";
 import { generateText } from "./providers.js";
 import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult } from "./types.js";
+
+const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
 const writerResponseSchema = z.object({
   summary: z.string().min(1),
@@ -108,6 +111,11 @@ export async function runDualAgentSession(
   let currentSummary = "";
   let pendingChanges: string[] = [];
   let operatorPlan: SessionResult["operatorPlan"];
+
+  const baseUrls = [request.writer, request.critic, request.operator]
+    .filter((config): config is NonNullable<typeof config> => Boolean(config))
+    .map((config) => config.baseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL);
+  await preflightDaemons(baseUrls);
 
   for (let round = 1; round <= request.maxRounds; round += 1) {
     const writerPrompt = buildWriterPrompt(request.prompt, currentCode, currentSummary, pendingChanges);
