@@ -521,11 +521,29 @@ function sendJson(res: ServerResponse, status: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
+const MAX_REQUEST_BODY_BYTES = (() => {
+  const raw = Number(process.env.MAX_REQUEST_BODY_BYTES);
+  return Number.isFinite(raw) && raw > 0 ? raw : 8 * 1024 * 1024;
+})();
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_REQUEST_BODY_BYTES) {
+    throw new Error(
+      `Invalid request: body exceeds ${MAX_REQUEST_BODY_BYTES} bytes (declared ${declared}).`
+    );
+  }
+
   const chunks: Buffer[] = [];
+  let total = 0;
 
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > MAX_REQUEST_BODY_BYTES) {
+      throw new Error(`Invalid request: body exceeds ${MAX_REQUEST_BODY_BYTES} bytes.`);
+    }
+    chunks.push(buf);
   }
 
   const body = Buffer.concat(chunks).toString("utf8").trim();
