@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 
 type BrowseEntry = { name: string; isDirectory: boolean; path: string };
-type BrowseResult = { cwd: string; parent: string | null; entries: BrowseEntry[] };
+type BrowseResult = {
+  cwd: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+  totalEntries?: number;
+  truncated?: boolean;
+};
 
 type Props = {
   initialPath?: string;
@@ -86,6 +92,12 @@ export function FolderPicker({ initialPath, onSelect, onClose }: Props) {
         </div>
 
         {error ? <p className="error">{error}</p> : null}
+        {current?.truncated ? (
+          <p className="folder-picker-truncated">
+            Showing first {current.entries.length} of {current.totalEntries} entries. Drill into a
+            subfolder to narrow the view.
+          </p>
+        ) : null}
 
         <ul className="folder-picker-list">
           {(current?.entries || [])
