@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "./ChatView";
 import { FolderPicker } from "./FolderPicker";
 import { streamSession } from "./sseSession";
@@ -103,6 +103,7 @@ type PersistedSettings = {
   anonymize: boolean;
   usOnly: boolean;
   mode: "writer_critic" | "consensus";
+  fallbackPool?: string[];
 };
 
 const defaultProviderFor = (model: string): ProviderConfig => ({
@@ -161,6 +162,8 @@ export function App() {
   const [usOnly, setUsOnly] = useState(initialSettings.usOnly);
   const [mode, setMode] = useState<"writer_critic" | "consensus">(initialSettings.mode);
   const [minRounds, setMinRounds] = useState(initialSettings.minRounds);
+  const [fallbackPool, setFallbackPool] = useState<string[]>(initialSettings.fallbackPool ?? []);
+  const autoSeedFallbackRef = useRef(initialSettings.fallbackPool === undefined);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("psychic-train:sidebar-collapsed") === "true";
@@ -189,7 +192,8 @@ export function App() {
         enableOperator,
         anonymize,
         usOnly,
-        mode
+        mode,
+        fallbackPool
       };
       try {
         window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
@@ -198,7 +202,7 @@ export function App() {
       }
     }, 250);
     return () => window.clearTimeout(handle);
-  }, [prompt, maxRounds, minRounds, writer, critic, operator, enableOperator, anonymize, usOnly, mode]);
+  }, [prompt, maxRounds, minRounds, writer, critic, operator, enableOperator, anonymize, usOnly, mode, fallbackPool]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -284,7 +288,18 @@ export function App() {
         country,
         entries: entries.sort((x, y) => x.tag.localeCompare(y.tag))
       }));
-  }, [localModels]);
+  }, [localModels, serverCatalog]);
+
+  useEffect(() => {
+    if (!autoSeedFallbackRef.current) return;
+    if (groupedModels.length === 0) return;
+    const abliteratedTags = groupedModels
+      .flatMap((group) => group.entries)
+      .filter((entry) => isAbliterated(entry.tag, entry))
+      .map((entry) => entry.tag);
+    if (abliteratedTags.length > 0) setFallbackPool(abliteratedTags);
+    autoSeedFallbackRef.current = false;
+  }, [groupedModels]);
 
   const statusLabel = useMemo(() => {
     if (!result) {
@@ -314,9 +329,9 @@ export function App() {
       usOnly,
       mode,
       ...(workspaceRoot ? { workspaceRoot } : {}),
-      writer: normalizeProvider(writer),
-      critic: normalizeProvider(critic),
-      ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
+      writer: normalizeProvider(writer, fallbackPool),
+      critic: normalizeProvider(critic, fallbackPool),
+      ...(enableOperator ? { operator: normalizeProvider(operator, fallbackPool) } : {})
     };
 
     let streamError: string | null = null;
@@ -472,6 +487,7 @@ export function App() {
                   <p className="provider-meta">Disabled. The run stops after writer and critic.</p>
                 )}
               </section>
+              <FallbackPool value={fallbackPool} onChange={setFallbackPool} groups={groupedModels} />
             </div>
 
             <label className="checkbox-row">
@@ -680,6 +696,7 @@ export function App() {
             mode={mode}
             anonymize={anonymize}
             usOnly={usOnly}
+            fallbackPool={fallbackPool}
             onDelegateStart={() => {
               setLiveTranscript([]);
               setResult(null);
@@ -778,25 +795,98 @@ function ProviderEditor({
         />
       </label>
 
-      <label>
-        Fallback on refusal
-        <input
-          type="text"
-          value={(value.fallbacks || []).join(", ")}
-          onChange={(event) => {
-            const next = event.target.value
-              .split(",")
-              .map((entry) => entry.trim())
-              .filter(Boolean);
-            onChange({ ...value, fallbacks: next });
-          }}
-          placeholder="comma-separated model tags, first is tried first"
-        />
-        <span className="provider-meta">
-          Only fires when the primary refuses (declines / apologises instead of producing output).
-          Any local tag you trust works here — e.g. an abliterated variant.
-        </span>
-      </label>
+    </section>
+  );
+}
+
+function FallbackPool({
+  value,
+  onChange,
+  groups
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+  groups: Array<{ country: string; entries: ModelInfo[] }>;
+}) {
+  const checked = new Set(value);
+  function toggle(tag: string) {
+    if (checked.has(tag)) {
+      onChange(value.filter((t) => t !== tag));
+    } else {
+      onChange([...value, tag]);
+    }
+  }
+  function move(tag: string, delta: -1 | 1) {
+    const index = value.indexOf(tag);
+    if (index < 0) return;
+    const target = index + delta;
+    if (target < 0 || target >= value.length) return;
+    const next = value.slice();
+    const [picked] = next.splice(index, 1);
+    next.splice(target, 0, picked as string);
+    onChange(next);
+  }
+
+  return (
+    <section className="provider-block fallback-pool">
+      <div className="provider-header">
+        <h2>Fallback pool</h2>
+      </div>
+      <p className="provider-meta">
+        Models to try in order when the chosen writer, critic, or operator refuses. Abliterated
+        local models are auto-checked; uncheck to keep a model out of the pool.
+      </p>
+      {groups.map((group) => (
+        <div key={group.country} className="fallback-pool-group">
+          <header>{group.country}</header>
+          <ul>
+            {group.entries.map((entry) => {
+              const isChecked = checked.has(entry.tag);
+              const order = isChecked ? value.indexOf(entry.tag) + 1 : null;
+              const abliterated = isAbliterated(entry.tag, entry);
+              return (
+                <li key={entry.tag} className={isChecked ? "active" : ""}>
+                  <label className="fallback-pool-row">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggle(entry.tag)}
+                    />
+                    <span className="fallback-pool-tag">
+                      {order !== null ? <span className="fallback-index">{order}</span> : null}
+                      <code>{entry.tag}</code>
+                      <span className="provider-meta">{entry.maker}</span>
+                      {abliterated ? (
+                        <span className="model-badge-abliterated">abliterated</span>
+                      ) : null}
+                    </span>
+                  </label>
+                  {isChecked ? (
+                    <div className="fallback-actions">
+                      <button
+                        type="button"
+                        onClick={() => move(entry.tag, -1)}
+                        disabled={value.indexOf(entry.tag) === 0}
+                        title="Move earlier in chain"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => move(entry.tag, 1)}
+                        disabled={value.indexOf(entry.tag) === value.length - 1}
+                        title="Move later in chain"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </section>
   );
 }
@@ -1005,15 +1095,16 @@ function latestCodeFrom(transcript: TranscriptTurn[]): string {
   return "";
 }
 
-function normalizeProvider(provider: ProviderConfig) {
-  const fallbacks = (provider.fallbacks || [])
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+function normalizeProvider(provider: ProviderConfig, pool: string[] = []) {
+  const explicit = (provider.fallbacks || []).map((tag) => tag.trim()).filter(Boolean);
+  const poolTrimmed = pool.map((tag) => tag.trim()).filter(Boolean);
+  const taken = new Set([provider.model.trim(), ...explicit]);
+  const merged = [...explicit, ...poolTrimmed.filter((tag) => !taken.has(tag))];
   return {
     provider: provider.provider,
     model: provider.model.trim(),
     ...(provider.baseUrl.trim() ? { baseUrl: provider.baseUrl.trim() } : {}),
     ...(provider.apiKey.trim() ? { apiKey: provider.apiKey.trim() } : {}),
-    ...(fallbacks.length > 0 ? { fallbacks } : {})
+    ...(merged.length > 0 ? { fallbacks: merged } : {})
   };
 }

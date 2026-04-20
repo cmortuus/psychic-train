@@ -7,6 +7,7 @@ type ProviderConfig = {
   model: string;
   baseUrl: string;
   apiKey: string;
+  fallbacks?: string[];
 };
 
 type ChatMessage =
@@ -56,6 +57,7 @@ type Props = {
   mode: "writer_critic" | "consensus";
   anonymize: boolean;
   usOnly: boolean;
+  fallbackPool: string[];
 };
 
 const STORAGE_KEY = "psychic-train:chat:v1";
@@ -90,7 +92,8 @@ export function ChatView({
   maxRounds,
   mode,
   anonymize,
-  usOnly
+  usOnly,
+  fallbackPool
 }: Props) {
   const initialRef = useRef<PersistedChat | null | undefined>(undefined);
   if (initialRef.current === undefined) {
@@ -170,9 +173,9 @@ export function ChatView({
         {
           messages: nextMessages,
           workspaceRoot,
-          operator: normalize(operator),
-          writer: normalize(writer),
-          critic: normalize(critic)
+          operator: normalize(operator, fallbackPool),
+          writer: normalize(writer, fallbackPool),
+          critic: normalize(critic, fallbackPool)
         },
         (event, data) => {
           if (event === "assistant_message") {
@@ -262,14 +265,14 @@ export function ChatView({
         {
           prompt: trimmed,
           workspaceRoot,
-          writer: normalize(writer),
-          critic: normalize(critic),
+          writer: normalize(writer, fallbackPool),
+          critic: normalize(critic, fallbackPool),
           minRounds,
           maxRounds,
           mode,
           anonymize,
           usOnly,
-          ...(operator.model ? { operator: normalize(operator) } : {})
+          ...(operator.model ? { operator: normalize(operator, fallbackPool) } : {})
         },
         (event, data) => {
           if (event === "iteration_start") {
@@ -463,11 +466,15 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
   return null;
 }
 
-function normalize(provider: ProviderConfig) {
+function normalize(provider: ProviderConfig, pool: string[] = []) {
+  const explicit = (provider.fallbacks || []).map((tag) => tag.trim()).filter(Boolean);
+  const taken = new Set([provider.model.trim(), ...explicit]);
+  const merged = [...explicit, ...pool.map((t) => t.trim()).filter((t) => t && !taken.has(t))];
   return {
     provider: provider.provider,
     model: provider.model.trim(),
     ...(provider.baseUrl.trim() ? { baseUrl: provider.baseUrl.trim() } : {}),
-    ...(provider.apiKey.trim() ? { apiKey: provider.apiKey.trim() } : {})
+    ...(provider.apiKey.trim() ? { apiKey: provider.apiKey.trim() } : {}),
+    ...(merged.length > 0 ? { fallbacks: merged } : {})
   };
 }
