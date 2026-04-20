@@ -114,9 +114,23 @@ export function App() {
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [serverCatalog, setServerCatalog] = useState<ModelInfo[] | null>(null);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [view, setView] = useState<AppView>("session");
+  const [userView, setUserView] = useState<AppView | null>(null);
+  const [isWide, setIsWide] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 1400px)").matches : true
+  );
   const [anonymize, setAnonymize] = useState(true);
   const [usOnly, setUsOnly] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(min-width: 1400px)");
+    const onChange = () => setIsWide(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  const view: AppView = userView ?? (isWide ? "split" : "chat");
+  const setView = (next: AppView) => setUserView(next);
 
   useEffect(() => {
     let cancelled = false;
@@ -361,18 +375,20 @@ export function App() {
 
       <main className="workspace">
         <nav className="view-tabs" role="tablist">
-          {(["session", "split", "chat"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="tab"
-              aria-selected={view === mode}
-              className={view === mode ? "active" : ""}
-              onClick={() => setView(mode)}
-            >
-              {mode === "session" ? "Session" : mode === "chat" ? "Chat" : "Split"}
-            </button>
-          ))}
+          {(["session", "split", "chat"] as const)
+            .filter((mode) => mode !== "split" || isWide)
+            .map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={view === mode}
+                className={view === mode ? "active" : ""}
+                onClick={() => setView(mode)}
+              >
+                {mode === "session" ? "Session" : mode === "chat" ? "Chat" : "Split"}
+              </button>
+            ))}
         </nav>
 
         <div className={`workspace-body view-${view}`}>
