@@ -125,11 +125,17 @@ export async function runDualAgentSession(
       model: request.writer.model
     });
     const writerStartedAt = Date.now();
-    const writerRaw = await generateText(request.writer, [
-      { role: "system", content: writerSystemPrompt },
-      { role: "user", content: writerPrompt }
-    ]);
-    const writerData = parseJson(writerRaw.text, writerResponseSchema, "writer", round, hooks);
+    const writerData = await generateStructured(
+      request.writer,
+      [
+        { role: "system", content: writerSystemPrompt },
+        { role: "user", content: writerPrompt }
+      ],
+      writerResponseSchema,
+      "writer",
+      round,
+      hooks
+    );
     hooks.onRoundComplete?.({
       agent: "writer",
       round,
@@ -155,17 +161,17 @@ export async function runDualAgentSession(
       model: request.critic.model
     });
     const criticStartedAt = Date.now();
-    const criticRaw = await generateText(request.critic, [
-      { role: "system", content: criticSystemPrompt },
-      { role: "user", content: criticPrompt }
-    ]);
-    const criticData = parseJson(
-      criticRaw.text,
+    const criticData = (await generateStructured(
+      request.critic,
+      [
+        { role: "system", content: criticSystemPrompt },
+        { role: "user", content: criticPrompt }
+      ],
       criticResponseSchema,
       "critic",
       round,
       hooks
-    ) as CriticResponse;
+    )) as CriticResponse;
     hooks.onRoundComplete?.({
       agent: "critic",
       round,
@@ -237,15 +243,15 @@ async function runOperatorStage(
     model: request.operator.model
   });
   const startedAt = Date.now();
-  const operatorRaw = await generateText(request.operator, [
-    { role: "system", content: operatorSystemPrompt },
-    {
-      role: "user",
-      content: buildOperatorPrompt(request.prompt, finalCode)
-    }
-  ]);
-  const operatorData = parseJson(
-    operatorRaw.text,
+  const operatorData = await generateStructured(
+    request.operator,
+    [
+      { role: "system", content: operatorSystemPrompt },
+      {
+        role: "user",
+        content: buildOperatorPrompt(request.prompt, finalCode)
+      }
+    ],
     operatorResponseSchema,
     "operator",
     round,
@@ -309,28 +315,70 @@ function buildOperatorPrompt(userPrompt: string, code: string): string {
   ].join("\n\n");
 }
 
-function parseJson<T>(
-  rawText: string,
+async function generateStructured<T>(
+  provider: SessionRequest["writer"],
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
   schema: z.ZodSchema<T>,
   label: "writer" | "critic" | "operator",
   round: number,
   hooks: SessionHooks
-): T {
+): Promise<T> {
+  const firstRaw = await generateText(provider, messages);
+  const firstAttempt = tryParseJson(firstRaw.text, schema);
+  if (firstAttempt.ok) {
+    return firstAttempt.value;
+  }
+
+  hooks.onParseFailure?.({
+    agent: label,
+    round,
+    excerpt: firstAttempt.excerpt
+  });
+
+  const retryMessages = [
+    ...messages,
+    { role: "assistant" as const, content: firstRaw.text },
+    {
+      role: "user" as const,
+      content: [
+        "Your previous reply was not valid JSON matching the required schema.",
+        `Reason: ${firstAttempt.reason}.`,
+        "Respond again with strict JSON only, no prose or code fences."
+      ].join(" ")
+    }
+  ];
+
+  const retryRaw = await generateText(provider, retryMessages);
+  const retryAttempt = tryParseJson(retryRaw.text, schema);
+  if (retryAttempt.ok) {
+    return retryAttempt.value;
+  }
+
+  hooks.onParseFailure?.({
+    agent: label,
+    round,
+    excerpt: retryAttempt.excerpt
+  });
+  throw new Error(
+    `Failed to parse ${label} response after retry: ${retryAttempt.reason}. Raw excerpt: ${retryAttempt.excerpt}`
+  );
+}
+
+type ParseResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: string; excerpt: string };
+
+function tryParseJson<T>(rawText: string, schema: z.ZodSchema<T>): ParseResult<T> {
   const trimmed = rawText.trim();
   const excerpt = rawText.replace(/\s+/g, " ").slice(0, 300);
 
   try {
     const jsonText = extractJsonObject(trimmed);
     const parsed = JSON.parse(jsonText);
-    return schema.parse(parsed);
+    return { ok: true, value: schema.parse(parsed) };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown parsing error";
-    hooks.onParseFailure?.({
-      agent: label,
-      round,
-      excerpt
-    });
-    throw new Error(`Failed to parse ${label} response: ${message}. Raw excerpt: ${excerpt}`);
+    const reason = error instanceof Error ? error.message : "Unknown parsing error";
+    return { ok: false, reason, excerpt };
   }
 }
 
