@@ -446,7 +446,124 @@ button:disabled {
   background: rgba(10, 20, 31, 0.7);
   border: 1px solid rgba(201, 219, 233, 0.12);
   border-radius: 10px;
-  width: fit-content;
+  align-items: center;
+}
+
+.view-tabs-spacer {
+  flex: 1;
+}
+
+.watchdog-indicator {
+  background: rgba(89, 198, 170, 0.14);
+  color: #59c6aa;
+  border: 1px solid rgba(89, 198, 170, 0.3);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.watchdog-indicator.alert {
+  background: rgba(255, 143, 128, 0.14);
+  color: #ff8f80;
+  border-color: rgba(255, 143, 128, 0.4);
+  animation: watchdog-pulse 2s infinite;
+}
+
+@keyframes watchdog-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 143, 128, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 143, 128, 0); }
+}
+
+.watchdog-drawer {
+  position: fixed;
+  top: 72px;
+  right: 24px;
+  width: min(420px, 92vw);
+  max-height: 70vh;
+  background: rgba(10, 20, 31, 0.98);
+  border: 1px solid rgba(201, 219, 233, 0.18);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 20;
+}
+
+.watchdog-drawer header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.watchdog-drawer h3 {
+  margin: 0;
+}
+
+.watchdog-close {
+  background: transparent;
+  border: 0;
+  color: #c7d4e0;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.watchdog-drawer ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.watchdog-drawer li {
+  padding: 10px 12px;
+  background: rgba(6, 14, 21, 0.72);
+  border: 1px solid rgba(201, 219, 233, 0.14);
+  border-left: 3px solid #ff8f80;
+  border-radius: 8px;
+}
+
+.watchdog-drawer .watchdog-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.watchdog-count {
+  background: rgba(255, 143, 128, 0.18);
+  color: #ffb4a8;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+}
+
+.watchdog-drawer p {
+  margin: 0 0 6px;
+  word-break: break-word;
+}
+
+.watchdog-drawer code {
+  background: #050b11;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.watchdog-item-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.watchdog-item-meta button {
+  padding: 4px 10px;
+  font-size: 0.8rem;
 }
 
 .view-tabs button {

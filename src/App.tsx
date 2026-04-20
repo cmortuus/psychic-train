@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ChatView } from "./ChatView";
 import { FolderPicker } from "./FolderPicker";
 import { streamSession } from "./sseSession";
+import { WatchdogIndicator } from "./Watchdog";
 
 type AppView = "session" | "split" | "chat";
 
@@ -558,6 +559,8 @@ export function App() {
                 {mode === "session" ? "Session" : mode === "chat" ? "Chat" : "Split"}
               </button>
             ))}
+          <div className="view-tabs-spacer" />
+          <WatchdogIndicator />
         </nav>
 
         <div className={`workspace-body view-${view}`}>

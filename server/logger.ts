@@ -2,6 +2,24 @@ type LogLevel = "info" | "error" | "debug";
 
 type LogFields = Record<string, string | number | boolean | null | undefined>;
 
+type LogEntry = {
+  ts: string;
+  level: LogLevel;
+  event: string;
+  fields: LogFields;
+};
+
+type Subscriber = (entry: LogEntry) => void;
+
+const subscribers: Set<Subscriber> = new Set();
+
+export function subscribeLogs(listener: Subscriber): () => void {
+  subscribers.add(listener);
+  return () => {
+    subscribers.delete(listener);
+  };
+}
+
 export function logInfo(event: string, fields: LogFields = {}) {
   writeLog("info", event, fields);
 }
@@ -19,20 +37,32 @@ export function logDebug(event: string, fields: LogFields = {}) {
 }
 
 function writeLog(level: LogLevel, event: string, fields: LogFields) {
+  const sanitized = sanitizeFields(fields);
+  const ts = new Date().toISOString();
   const payload = {
-    ts: new Date().toISOString(),
+    ts,
     level,
     event,
-    ...sanitizeFields(fields)
+    ...sanitized
   };
 
   const line = JSON.stringify(payload);
   if (level === "error") {
     console.error(line);
-    return;
+  } else {
+    console.log(line);
   }
 
-  console.log(line);
+  if (subscribers.size > 0) {
+    const entry: LogEntry = { ts, level, event, fields: sanitized };
+    for (const listener of subscribers) {
+      try {
+        listener(entry);
+      } catch {
+        // never let a bad subscriber break the logger
+      }
+    }
+  }
 }
 
 function sanitizeFields(fields: LogFields) {
@@ -71,3 +101,5 @@ function isDebugEnabled() {
   const value = process.env.LOG_LEVEL?.toLowerCase();
   return value === "debug";
 }
+
+export type { LogEntry, LogLevel, LogFields };
