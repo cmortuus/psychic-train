@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
+import { AutopilotRequest, ShellDisabledError, runAutopilot } from "./autopilot.js";
 import { browseDirectory } from "./browse.js";
 import { ChatMessage, ChatRequest, runChatTurn } from "./chatRunner.js";
 import { mergedCatalog } from "./cloudCatalog.js";
@@ -266,6 +267,74 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/api/autopilot/stream") {
+    try {
+      const body = await readJsonBody(req);
+      const parsed = parseAutopilotRequest(body);
+      logInfo("autopilot.start", {
+        promptLength: parsed.prompt.length,
+        workspaceRoot: parsed.workspaceRoot,
+        maxIterations: parsed.maxIterations
+      });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.writeHead(200);
+
+      const abortController = new AbortController();
+      const onClientClose = () => abortController.abort();
+      req.on("close", onClientClose);
+
+      const send = (event: string, data: unknown) => {
+        if (!res.writableEnded) {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+      };
+
+      try {
+        const result = await runAutopilot(
+          parsed,
+          {
+            onIterationStart(iteration, taskPrompt) { send("iteration_start", { iteration, taskPrompt }); },
+            onIterationComplete(iteration) { send("iteration_complete", { iteration }); },
+            onSessionTurn(turn) { send("session_turn", turn); },
+            onTestResult(result) { send("test_result", result); },
+            onCommit(details) { send("commit", details); },
+            onNote(message) { send("note", { message }); }
+          },
+          abortController.signal
+        );
+        logInfo("autopilot.complete", {
+          status: result.status,
+          iterations: result.iterations,
+          committed: Boolean(result.committed)
+        });
+        send("done", result);
+      } catch (error) {
+        if (error instanceof CancelledError) {
+          send("cancelled", { message: error.message });
+        } else if (error instanceof ShellDisabledError) {
+          send("error", { message: error.message, code: error.code });
+        } else {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          const code = error instanceof DaemonUnreachableError ? error.code : undefined;
+          logError("autopilot.error", { message, ...(code ? { code } : {}) });
+          send("error", { message, ...(code ? { code } : {}) });
+        }
+      } finally {
+        req.off("close", onClientClose);
+        res.end();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Invalid request") ? 400 : 500;
+      logError("autopilot.error", { status, message });
+      sendJson(res, status, { error: message });
+    }
+    return;
+  }
+
   if (req.method === "POST" && req.url === "/api/chat/stream") {
     try {
       const body = await readJsonBody(req);
@@ -464,6 +533,34 @@ function parseProvider(value: unknown, label: string): ProviderConfig {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseAutopilotRequest(value: unknown): AutopilotRequest {
+  if (!isRecord(value)) {
+    throw new Error("Invalid request: expected an object body");
+  }
+  const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
+  if (!prompt) {
+    throw new Error("Invalid request: prompt is required");
+  }
+  const workspaceRoot = typeof value.workspaceRoot === "string" ? value.workspaceRoot.trim() : "";
+  if (!workspaceRoot) {
+    throw new Error("Invalid request: workspaceRoot is required");
+  }
+  const req: AutopilotRequest = {
+    prompt,
+    workspaceRoot,
+    writer: parseProvider(value.writer, "writer"),
+    critic: parseProvider(value.critic, "critic"),
+    ...(value.operator ? { operator: parseProvider(value.operator, "operator") } : {}),
+    ...(Number.isInteger(value.maxIterations) && (value.maxIterations as number) >= 1
+      ? { maxIterations: value.maxIterations as number }
+      : {}),
+    ...(typeof value.anonymize === "boolean" ? { anonymize: value.anonymize } : {}),
+    ...(typeof value.usOnly === "boolean" ? { usOnly: value.usOnly } : {}),
+    ...(value.mode === "consensus" || value.mode === "writer_critic" ? { mode: value.mode } : {})
+  };
+  return req;
 }
 
 function parseChatRequest(value: unknown): ChatRequest {
