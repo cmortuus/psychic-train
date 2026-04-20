@@ -105,6 +105,31 @@ function shellTimeoutMs(): number {
 const MAX_FILE_READ_BYTES = 256 * 1024;
 const MAX_FILE_WRITE_BYTES = 1 * 1024 * 1024;
 
+const MAX_SHELL_ARGS = 64;
+const MAX_SHELL_ARG_BYTES = 8192;
+
+function checkArgBounds(
+  label: string,
+  args: string[]
+): { ok: true } | { ok: false; summary: string } {
+  if (args.length > MAX_SHELL_ARGS) {
+    return {
+      ok: false,
+      summary: `Refused: ${label} received ${args.length} args (limit ${MAX_SHELL_ARGS}).`
+    };
+  }
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (typeof arg === "string" && arg.length > MAX_SHELL_ARG_BYTES) {
+      return {
+        ok: false,
+        summary: `Refused: ${label} arg[${i}] is ${arg.length} chars (limit ${MAX_SHELL_ARG_BYTES}).`
+      };
+    }
+  }
+  return { ok: true };
+}
+
 export async function runGitAllowlisted(
   workspace: Workspace,
   args: string[],
@@ -170,6 +195,8 @@ export async function executeTool(
       };
     }
     case "run_git": {
+      const bounds = checkArgBounds("run_git", call.args);
+      if (!bounds.ok) return bounds;
       const result = await runGitAllowlisted(workspace, call.args, signal);
       return {
         ok: result.code === 0,
@@ -236,6 +263,11 @@ export async function executeTool(
           summary: `Command ${call.command} is not in the shell allowlist (${Array.from(allow).join(", ")}). Override via SHELL_ALLOWLIST env.`
         };
       }
+      if (call.command.length > MAX_SHELL_ARG_BYTES) {
+        return { ok: false, summary: `Refused: run_shell command is ${call.command.length} chars (limit ${MAX_SHELL_ARG_BYTES}).` };
+      }
+      const bounds = checkArgBounds("run_shell", call.args);
+      if (!bounds.ok) return bounds;
       const timeoutMs = shellTimeoutMs();
       const result = await runCommand(call.command, call.args, workspace.root, timeoutMs, signal);
       const detailParts: string[] = [];

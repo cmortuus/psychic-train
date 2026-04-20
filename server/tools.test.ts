@@ -50,6 +50,24 @@ describe("run_shell tool", () => {
     expect(result.detail).toContain(workspace.root);
   });
 
+  it("refuses when args array is too long", async () => {
+    process.env.ALLOW_SHELL_EXEC = "true";
+    process.env.SHELL_ALLOWLIST = "node";
+    const big = Array.from({ length: 100 }, (_, i) => `a${i}`);
+    const result = await executeTool({ type: "run_shell", command: "node", args: big }, workspace);
+    expect(result.ok).toBe(false);
+    expect(result.summary).toMatch(/100 args/);
+  });
+
+  it("refuses when an individual arg is too long", async () => {
+    process.env.ALLOW_SHELL_EXEC = "true";
+    process.env.SHELL_ALLOWLIST = "node";
+    const giant = "x".repeat(20_000);
+    const result = await executeTool({ type: "run_shell", command: "node", args: [giant] }, workspace);
+    expect(result.ok).toBe(false);
+    expect(result.summary).toMatch(/arg\[0\] is 20000 chars/);
+  });
+
   it("reports timeout when the command exceeds SHELL_TIMEOUT_MS", async () => {
     process.env.ALLOW_SHELL_EXEC = "true";
     process.env.SHELL_ALLOWLIST = "node";
