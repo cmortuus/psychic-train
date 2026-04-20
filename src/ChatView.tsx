@@ -50,19 +50,67 @@ type Props = {
   onDelegateStart?: () => void;
 };
 
+const STORAGE_KEY = "psychic-train:chat:v1";
+
+type PersistedChat = {
+  messages: ChatMessage[];
+  workspaceRoot: string;
+  timeline: TimelineEntry[];
+};
+
+function loadPersisted(): PersistedChat | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedChat;
+    if (!Array.isArray(parsed.messages) || !Array.isArray(parsed.timeline)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateStart }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [workspaceRoot, setWorkspaceRoot] = useState("");
+  const initialRef = useRef<PersistedChat | null | undefined>(undefined);
+  if (initialRef.current === undefined) {
+    initialRef.current = loadPersisted();
+  }
+  const initial = initialRef.current;
+  const [messages, setMessages] = useState<ChatMessage[]>(initial?.messages || []);
+  const [workspaceRoot, setWorkspaceRoot] = useState(initial?.workspaceRoot || "");
   const [input, setInput] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>(initial?.timeline || []);
   const [pickerOpen, setPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef<boolean>(true);
 
   const activeWorkspace = useMemo(() => workspaceRoot || "(default: server cwd)", [workspaceRoot]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handle = window.setTimeout(() => {
+      const payload: PersistedChat = { messages, workspaceRoot, timeline };
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch {
+        // quota or disabled storage — drop silently
+      }
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [messages, workspaceRoot, timeline]);
+
+  function handleClear() {
+    setMessages([]);
+    setTimeline([]);
+    setError(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  }
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -201,6 +249,7 @@ export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateS
               onChange={(event) => handleWorkspaceChange(event.target.value)}
             />
             <button type="button" onClick={() => setPickerOpen(true)}>Browse…</button>
+            <button type="button" onClick={handleClear} disabled={isRunning || (messages.length === 0 && timeline.length === 0)}>Clear</button>
           </div>
         </label>
         <p className="provider-meta">Active: <code>{activeWorkspace}</code></p>
