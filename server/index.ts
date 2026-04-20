@@ -93,7 +93,15 @@ const server = createServer(async (req, res) => {
         throw new Error(`Invalid request: toolCall — ${toolCall.error.issues[0]?.message || "malformed"}`);
       }
       const workspace = await resolveWorkspace(workspaceRoot);
-      const result = await executeTool(toolCall.data, workspace);
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      req.on("close", onClose);
+      let result;
+      try {
+        result = await executeTool(toolCall.data, workspace, controller.signal);
+      } finally {
+        req.off("close", onClose);
+      }
       logInfo("tool.run", {
         type: toolCall.data.type,
         ok: result.ok,

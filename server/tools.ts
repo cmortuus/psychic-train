@@ -106,8 +106,9 @@ const MAX_FILE_WRITE_BYTES = 1 * 1024 * 1024;
 
 export async function runGitAllowlisted(
   workspace: Workspace,
-  args: string[]
-): Promise<{ stdout: string; stderr: string; code: number }> {
+  args: string[],
+  signal?: AbortSignal
+): Promise<{ stdout: string; stderr: string; code: number; timedOut: boolean; aborted: boolean }> {
   const first = args[0] || "";
   if (GIT_DISALLOWED.has(first)) {
     throw new Error(`git ${first} is blocked by the operator tool allowlist.`);
@@ -118,12 +119,13 @@ export async function runGitAllowlisted(
     );
   }
 
-  return runCommand("git", args, workspace.root);
+  return runCommand("git", args, workspace.root, undefined, signal);
 }
 
 export async function executeTool(
   call: ToolCall,
-  workspace: Workspace
+  workspace: Workspace,
+  signal?: AbortSignal
 ): Promise<ToolResult> {
   switch (call.type) {
     case "message":
@@ -139,7 +141,7 @@ export async function executeTool(
     case "clone_repo": {
       const destParent = dirname(call.destination);
       await mkdir(destParent, { recursive: true }).catch(() => undefined);
-      const result = await runCommand("git", ["clone", call.repoUrl, call.destination], destParent);
+      const result = await runCommand("git", ["clone", call.repoUrl, call.destination], destParent, undefined, signal);
       if (result.code !== 0) {
         return {
           ok: false,
@@ -156,7 +158,7 @@ export async function executeTool(
       };
     }
     case "run_git": {
-      const result = await runGitAllowlisted(workspace, call.args);
+      const result = await runGitAllowlisted(workspace, call.args, signal);
       return {
         ok: result.code === 0,
         summary: `git ${call.args.join(" ")} (exit ${result.code})`,
@@ -223,14 +225,15 @@ export async function executeTool(
         };
       }
       const timeoutMs = shellTimeoutMs();
-      const result = await runCommand(call.command, call.args, workspace.root, timeoutMs);
+      const result = await runCommand(call.command, call.args, workspace.root, timeoutMs, signal);
       const detailParts: string[] = [];
       if (result.stdout.trim()) detailParts.push(result.stdout.trim());
       if (result.stderr.trim()) detailParts.push(`[stderr]\n${result.stderr.trim()}`);
       if (result.timedOut) detailParts.push(`[timeout] exceeded ${timeoutMs}ms`);
+      if (result.aborted) detailParts.push(`[aborted] client cancelled the request`);
       return {
-        ok: !result.timedOut && result.code === 0,
-        summary: `${call.command} ${call.args.join(" ")}`.trim() + ` (exit ${result.code}${result.timedOut ? ", timed out" : ""})`,
+        ok: !result.timedOut && !result.aborted && result.code === 0,
+        summary: `${call.command} ${call.args.join(" ")}`.trim() + ` (exit ${result.code}${result.timedOut ? ", timed out" : ""}${result.aborted ? ", aborted" : ""})`,
         detail: detailParts.join("\n")
       };
     }
@@ -241,7 +244,7 @@ export async function executeTool(
           summary: "run_tests requires ALLOW_SHELL_EXEC=true (it shells out to the detected test runner)."
         };
       }
-      const result = await runTests(workspace);
+      const result = await runTests(workspace, signal);
       const detailParts: string[] = [];
       detailParts.push(`project: ${result.projectType ?? "unknown"}`);
       detailParts.push(`command: ${result.command || "(none)"}`);
@@ -264,13 +267,29 @@ function runCommand(
   command: string,
   args: string[],
   cwd: string,
-  timeoutMs?: number
-): Promise<{ stdout: string; stderr: string; code: number; timedOut: boolean }> {
+  timeoutMs?: number,
+  signal?: AbortSignal
+): Promise<{ stdout: string; stderr: string; code: number; timedOut: boolean; aborted: boolean }> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      resolve({ stdout: "", stderr: "", code: -1, timedOut: false, aborted: true });
+      return;
+    }
     const child = spawn(command, args, { cwd });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }, 2_000).unref();
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
     const timer = timeoutMs
       ? setTimeout(() => {
           timedOut = true;
@@ -286,11 +305,13 @@ function runCommand(
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     child.on("error", (error) => {
       if (timer) clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
       reject(error);
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
-      resolve({ stdout, stderr, code: code ?? -1, timedOut });
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve({ stdout, stderr, code: code ?? -1, timedOut, aborted });
     });
   });
 }
