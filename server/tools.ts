@@ -28,7 +28,12 @@ export const toolCallSchema = z.discriminatedUnion("type", [
     path: z.string().min(1),
     content: z.string()
   }),
-  z.object({ type: z.literal("list_dir"), path: z.string().default(".") })
+  z.object({ type: z.literal("list_dir"), path: z.string().default(".") }),
+  z.object({
+    type: z.literal("run_shell"),
+    command: z.string().min(1),
+    args: z.array(z.string()).default([])
+  })
 ]);
 
 export type ToolCall = z.infer<typeof toolCallSchema>;
@@ -57,6 +62,42 @@ const GIT_ALLOWLIST = new Set([
 ]);
 
 const GIT_DISALLOWED = new Set(["push", "reset", "rebase", "checkout", "clean", "rm"]);
+
+const DEFAULT_SHELL_ALLOWLIST = new Set([
+  "npm",
+  "yarn",
+  "pnpm",
+  "bun",
+  "node",
+  "tsc",
+  "vitest",
+  "pytest",
+  "python",
+  "python3",
+  "cargo",
+  "go",
+  "make",
+  "deno"
+]);
+
+function getShellAllowlist(): Set<string> {
+  const raw = process.env.SHELL_ALLOWLIST;
+  if (!raw) return DEFAULT_SHELL_ALLOWLIST;
+  const entries = raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return entries.length === 0 ? DEFAULT_SHELL_ALLOWLIST : new Set(entries);
+}
+
+function shellEnabled(): boolean {
+  return (process.env.ALLOW_SHELL_EXEC || "").toLowerCase() === "true";
+}
+
+function shellTimeoutMs(): number {
+  const raw = Number(process.env.SHELL_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 120_000;
+}
 
 const MAX_FILE_READ_BYTES = 256 * 1024;
 const MAX_FILE_WRITE_BYTES = 1 * 1024 * 1024;
@@ -159,6 +200,38 @@ export async function executeTool(
         .join("\n");
       return { ok: true, summary: `${entries.length} entries in ${absolute}.`, detail: listing };
     }
+    case "run_shell": {
+      if (!shellEnabled()) {
+        return {
+          ok: false,
+          summary: "run_shell is disabled. Set ALLOW_SHELL_EXEC=true to enable."
+        };
+      }
+      if (call.command === "git") {
+        return {
+          ok: false,
+          summary: "Use run_git for git subcommands (allowlisted)."
+        };
+      }
+      const allow = getShellAllowlist();
+      if (!allow.has(call.command)) {
+        return {
+          ok: false,
+          summary: `Command ${call.command} is not in the shell allowlist (${Array.from(allow).join(", ")}). Override via SHELL_ALLOWLIST env.`
+        };
+      }
+      const timeoutMs = shellTimeoutMs();
+      const result = await runCommand(call.command, call.args, workspace.root, timeoutMs);
+      const detailParts: string[] = [];
+      if (result.stdout.trim()) detailParts.push(result.stdout.trim());
+      if (result.stderr.trim()) detailParts.push(`[stderr]\n${result.stderr.trim()}`);
+      if (result.timedOut) detailParts.push(`[timeout] exceeded ${timeoutMs}ms`);
+      return {
+        ok: !result.timedOut && result.code === 0,
+        summary: `${call.command} ${call.args.join(" ")}`.trim() + ` (exit ${result.code}${result.timedOut ? ", timed out" : ""})`,
+        detail: detailParts.join("\n")
+      };
+    }
     case "delegate_coding_task":
       return { ok: true, summary: `Delegating coding task: ${call.task}` };
   }
@@ -167,17 +240,34 @@ export async function executeTool(
 function runCommand(
   command: string,
   args: string[],
-  cwd: string
-): Promise<{ stdout: string; stderr: string; code: number }> {
+  cwd: string,
+  timeoutMs?: number
+): Promise<{ stdout: string; stderr: string; code: number; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) {
+              child.kill("SIGKILL");
+            }
+          }, 2_000).unref();
+        }, timeoutMs)
+      : null;
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
     child.on("close", (code) => {
-      resolve({ stdout, stderr, code: code ?? -1 });
+      if (timer) clearTimeout(timer);
+      resolve({ stdout, stderr, code: code ?? -1, timedOut });
     });
   });
 }
