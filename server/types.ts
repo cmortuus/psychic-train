@@ -37,9 +37,12 @@ export type SessionRequest = {
   workspaceRoot?: string;
 };
 
+export type SessionFile = { path: string; content: string };
+
 export type SessionResult = {
   transcript: AgentTurn[];
   finalCode: string;
+  finalFiles: SessionFile[];
   status: "approved" | "max_rounds" | "cancelled";
   operatorPlan?: {
     summary: string;

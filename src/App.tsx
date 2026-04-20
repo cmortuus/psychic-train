@@ -29,10 +29,13 @@ type OperatorAction = {
   command?: string;
 };
 
+type SessionFile = { path: string; content: string };
+
 type SessionResponse = {
   transcript: TranscriptTurn[];
   finalCode: string;
-  status: "approved" | "max_rounds";
+  finalFiles?: SessionFile[];
+  status: "approved" | "max_rounds" | "cancelled";
   operatorPlan?: {
     summary: string;
     actions: OperatorAction[];
@@ -615,9 +618,12 @@ export function App() {
 
         <section className="panel code-panel">
           <div className="panel-header">
-            <h2>Final code</h2>
+            <h2>Final files</h2>
           </div>
-          <pre>{result?.finalCode || latestCodeFrom(liveTranscript) || "// Final code will appear here"}</pre>
+          <FinalFilesView
+            files={result?.finalFiles}
+            fallbackCode={result?.finalCode || latestCodeFrom(liveTranscript)}
+          />
         </section>
 
         <section className="panel">
@@ -780,6 +786,45 @@ function ModelBadge({
       <code>{tag}</code>
       {abliterated ? <span className="model-badge-abliterated" title="Refusal direction orthogonalized">abliterated</span> : null}
     </span>
+  );
+}
+
+function FinalFilesView({
+  files,
+  fallbackCode
+}: {
+  files?: SessionFile[];
+  fallbackCode?: string;
+}) {
+  const list = files && files.length > 0
+    ? files
+    : fallbackCode
+      ? [{ path: "(writer output)", content: fallbackCode }]
+      : [];
+  const [selected, setSelected] = useState<string | null>(null);
+  const active = list.find((f) => f.path === selected) || list[0];
+
+  if (list.length === 0) {
+    return <pre>{"// Final files will appear here"}</pre>;
+  }
+
+  return (
+    <div className="final-files">
+      <ul className="final-files-list">
+        {list.map((file) => (
+          <li key={file.path}>
+            <button
+              type="button"
+              className={active?.path === file.path ? "active" : ""}
+              onClick={() => setSelected(file.path)}
+            >
+              {file.path}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <pre className="final-files-pane">{active?.content ?? ""}</pre>
+    </div>
   );
 }
 

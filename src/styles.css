@@ -315,7 +315,8 @@ button:disabled {
   border-left: 3px solid #85a7ff;
 }
 
-.code-panel pre {
+.code-panel pre,
+.final-files-pane {
   margin: 0;
   padding: 16px;
   overflow: auto;
@@ -325,6 +326,53 @@ button:disabled {
   border: 1px solid rgba(201, 219, 233, 0.12);
   color: #d8e4ef;
   white-space: pre;
+}
+
+.final-files {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.final-files-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(201, 219, 233, 0.12);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: min(70vh, 720px);
+  background: rgba(6, 14, 21, 0.72);
+}
+
+.final-files-list li + li {
+  border-top: 1px solid rgba(201, 219, 233, 0.08);
+}
+
+.final-files-list button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #dce7f1;
+  border: 0;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.final-files-list button.active {
+  background: rgba(89, 198, 170, 0.14);
+  color: #59c6aa;
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .final-files {
+    grid-template-columns: 1fr;
+  }
 }
 
 .turn-code-toggle {
