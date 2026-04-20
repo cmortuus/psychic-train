@@ -224,6 +224,27 @@ button:disabled {
   border: 1px dashed rgba(201, 219, 233, 0.18);
 }
 
+.error-boundary {
+  max-width: 720px;
+  margin: 80px auto;
+  padding: 28px;
+  background: rgba(10, 20, 31, 0.82);
+  border: 1px solid rgba(255, 143, 128, 0.4);
+  border-left: 3px solid #ff8f80;
+  display: grid;
+  gap: 16px;
+}
+
+.error-boundary pre {
+  margin: 0;
+  padding: 14px;
+  background: #050b11;
+  border: 1px solid rgba(201, 219, 233, 0.12);
+  color: #ffb4a8;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
