@@ -1,5 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { FolderPicker } from "./FolderPicker";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { streamChat } from "./sseChat";
 
 type ProviderConfig = {
@@ -46,6 +45,8 @@ type Props = {
   operator: ProviderConfig;
   writer: ProviderConfig;
   critic: ProviderConfig;
+  workspaceRoot: string;
+  onWorkspaceChange: (next: string) => void;
   onDelegateTurn?: (turn: DelegateTurn) => void;
   onDelegateStart?: () => void;
 };
@@ -54,7 +55,6 @@ const STORAGE_KEY = "psychic-train:chat:v1";
 
 type PersistedChat = {
   messages: ChatMessage[];
-  workspaceRoot: string;
   timeline: TimelineEntry[];
 };
 
@@ -71,29 +71,26 @@ function loadPersisted(): PersistedChat | null {
   }
 }
 
-export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateStart }: Props) {
+export function ChatView({ operator, writer, critic, workspaceRoot, onWorkspaceChange, onDelegateTurn, onDelegateStart }: Props) {
   const initialRef = useRef<PersistedChat | null | undefined>(undefined);
   if (initialRef.current === undefined) {
     initialRef.current = loadPersisted();
   }
   const initial = initialRef.current;
   const [messages, setMessages] = useState<ChatMessage[]>(initial?.messages || []);
-  const [workspaceRoot, setWorkspaceRoot] = useState(initial?.workspaceRoot || "");
+  const setWorkspaceRoot = onWorkspaceChange;
   const [input, setInput] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>(initial?.timeline || []);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef<boolean>(true);
 
-  const activeWorkspace = useMemo(() => workspaceRoot || "(default: server cwd)", [workspaceRoot]);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handle = window.setTimeout(() => {
-      const payload: PersistedChat = { messages, workspaceRoot, timeline };
+      const payload: PersistedChat = { messages, timeline };
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch {
@@ -101,7 +98,7 @@ export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateS
       }
     }, 250);
     return () => window.clearTimeout(handle);
-  }, [messages, workspaceRoot, timeline]);
+  }, [messages, timeline]);
 
   function handleClear() {
     setMessages([]);
@@ -224,10 +221,6 @@ export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateS
     abortRef.current?.abort();
   }
 
-  function handleWorkspaceChange(next: string) {
-    setWorkspaceRoot(next);
-  }
-
   return (
     <section className="chat-view">
       <header className="chat-header">
@@ -239,30 +232,16 @@ export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateS
             allowlisted git commands, and can switch workspaces or clone repos on the fly.
           </p>
         </div>
-        <label className="workspace-input">
-          <span>Workspace</span>
-          <div className="workspace-input-row">
-            <input
-              type="text"
-              placeholder="/absolute/path (blank = server cwd)"
-              value={workspaceRoot}
-              onChange={(event) => handleWorkspaceChange(event.target.value)}
-            />
-            <button type="button" onClick={() => setPickerOpen(true)}>Browse…</button>
-            <button type="button" onClick={handleClear} disabled={isRunning || (messages.length === 0 && timeline.length === 0)}>Clear</button>
-          </div>
-        </label>
-        <p className="provider-meta">Active: <code>{activeWorkspace}</code></p>
-        {pickerOpen ? (
-          <FolderPicker
-            initialPath={workspaceRoot}
-            onSelect={(path) => {
-              setWorkspaceRoot(path);
-              setPickerOpen(false);
-            }}
-            onClose={() => setPickerOpen(false)}
-          />
-        ) : null}
+        <div className="chat-header-actions">
+          <p className="provider-meta">Workspace: <code>{workspaceRoot || "(default: server cwd)"}</code></p>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={isRunning || (messages.length === 0 && timeline.length === 0)}
+          >
+            Clear chat
+          </button>
+        </div>
       </header>
 
       <div className="chat-scroll" ref={scrollRef}>
