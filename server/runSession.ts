@@ -737,14 +737,69 @@ function tryParseJson<T>(rawText: string, schema: z.ZodSchema<T>): ParseResult<T
   const trimmed = rawText.trim();
   const excerpt = rawText.replace(/\s+/g, " ").slice(0, 300);
 
+  let jsonText: string;
   try {
-    const jsonText = extractJsonObject(trimmed);
-    const parsed = JSON.parse(jsonText);
-    return { ok: true, value: schema.parse(parsed) };
+    jsonText = extractJsonObject(trimmed);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown parsing error";
     return { ok: false, reason, excerpt };
   }
+
+  try {
+    return { ok: true, value: schema.parse(JSON.parse(jsonText)) };
+  } catch (firstError) {
+    // Try a lenient repair pass: escape raw control characters that the model
+    // forgot to escape inside string literals (newlines, tabs, CRs).
+    try {
+      const repaired = repairControlCharsInJsonStrings(jsonText);
+      if (repaired !== jsonText) {
+        return { ok: true, value: schema.parse(JSON.parse(repaired)) };
+      }
+    } catch {
+      // fall through to original error
+    }
+    const reason = firstError instanceof Error ? firstError.message : "Unknown parsing error";
+    return { ok: false, reason, excerpt };
+  }
+}
+
+export function repairControlCharsInJsonStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] as string;
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out += ch;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      out += ch;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = false;
+      out += ch;
+      continue;
+    }
+    if (ch === "\n") { out += "\\n"; continue; }
+    if (ch === "\r") { out += "\\r"; continue; }
+    if (ch === "\t") { out += "\\t"; continue; }
+    const code = ch.charCodeAt(0);
+    if (code < 0x20) {
+      out += "\\u" + code.toString(16).padStart(4, "0");
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 export function extractJsonObject(text: string): string {
