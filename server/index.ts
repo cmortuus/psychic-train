@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
+import { browseDirectory } from "./browse.js";
 import { ChatMessage, ChatRequest, runChatTurn } from "./chatRunner.js";
 import { logError, logInfo } from "./logger.js";
 import { DaemonUnreachableError, fetchOllamaTags } from "./ollamaApi.js";
@@ -44,6 +45,25 @@ const server = createServer(async (req, res) => {
       durationMs: Date.now() - startedAt
     });
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "GET" && req.url && req.url.startsWith("/api/browse")) {
+    try {
+      const path = new URL(req.url, "http://x").searchParams.get("path");
+      const result = await browseDirectory(path);
+      logInfo("http.request", {
+        method: req.method,
+        path: req.url,
+        status: 200,
+        durationMs: Date.now() - startedAt
+      });
+      sendJson(res, 200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      logError("browse.error", { message });
+      sendJson(res, 400, { error: message });
+    }
     return;
   }
 

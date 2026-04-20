@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FolderPicker } from "./FolderPicker";
 import { streamChat } from "./sseChat";
 
 type ProviderConfig = {
@@ -46,6 +47,7 @@ export function ChatView({ operator, writer, critic }: Props) {
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -159,14 +161,27 @@ export function ChatView({ operator, writer, critic }: Props) {
         </div>
         <label className="workspace-input">
           <span>Workspace</span>
-          <input
-            type="text"
-            placeholder="/absolute/path (blank = server cwd)"
-            value={workspaceRoot}
-            onChange={(event) => handleWorkspaceChange(event.target.value)}
-          />
+          <div className="workspace-input-row">
+            <input
+              type="text"
+              placeholder="/absolute/path (blank = server cwd)"
+              value={workspaceRoot}
+              onChange={(event) => handleWorkspaceChange(event.target.value)}
+            />
+            <button type="button" onClick={() => setPickerOpen(true)}>Browse…</button>
+          </div>
         </label>
         <p className="provider-meta">Active: <code>{activeWorkspace}</code></p>
+        {pickerOpen ? (
+          <FolderPicker
+            initialPath={workspaceRoot}
+            onSelect={(path) => {
+              setWorkspaceRoot(path);
+              setPickerOpen(false);
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        ) : null}
       </header>
 
       <div className="chat-scroll" ref={scrollRef}>

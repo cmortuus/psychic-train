@@ -457,6 +457,127 @@ button:disabled {
   gap: 10px;
 }
 
+.workspace-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.workspace-input-row input {
+  flex: 1;
+}
+
+.workspace-input-row button {
+  padding: 10px 14px;
+}
+
+.folder-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+
+.folder-picker {
+  width: min(640px, 92vw);
+  max-height: min(80vh, 720px);
+  background: rgba(10, 20, 31, 0.98);
+  border: 1px solid rgba(201, 219, 233, 0.18);
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  gap: 12px;
+  min-height: 0;
+}
+
+.folder-picker header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+
+.folder-picker header h3 {
+  margin: 0 0 4px;
+}
+
+.folder-picker header code {
+  word-break: break-all;
+  color: #86a3bf;
+  font-size: 0.85rem;
+}
+
+.folder-picker-close {
+  background: transparent;
+  color: #c7d4e0;
+  border: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.folder-picker-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.folder-picker-nav input {
+  flex: 1;
+}
+
+.folder-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.folder-picker-list li button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #dce7f1;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.folder-picker-list li button:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(201, 219, 233, 0.18);
+}
+
+.folder-picker-empty {
+  color: #86a3bf;
+  padding: 8px 10px;
+  font-style: italic;
+}
+
+.folder-picker footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.folder-picker footer button {
+  background: rgba(255, 255, 255, 0.06);
+  color: #dce7f1;
+}
+
+.folder-picker footer button.primary {
+  background: #59c6aa;
+  color: #04130f;
+}
+
 .chat-input textarea {
   min-height: 72px;
   resize: vertical;
