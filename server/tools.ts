@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { runTests } from "./testRunner.js";
 import { Workspace, assertPathInsideWorkspace, resolveWorkspace } from "./workspace.js";
 
 export const toolCallSchema = z.discriminatedUnion("type", [
@@ -33,7 +34,8 @@ export const toolCallSchema = z.discriminatedUnion("type", [
     type: z.literal("run_shell"),
     command: z.string().min(1),
     args: z.array(z.string()).default([])
-  })
+  }),
+  z.object({ type: z.literal("run_tests") })
 ]);
 
 export type ToolCall = z.infer<typeof toolCallSchema>;
@@ -229,6 +231,27 @@ export async function executeTool(
       return {
         ok: !result.timedOut && result.code === 0,
         summary: `${call.command} ${call.args.join(" ")}`.trim() + ` (exit ${result.code}${result.timedOut ? ", timed out" : ""})`,
+        detail: detailParts.join("\n")
+      };
+    }
+    case "run_tests": {
+      if (!shellEnabled()) {
+        return {
+          ok: false,
+          summary: "run_tests requires ALLOW_SHELL_EXEC=true (it shells out to the detected test runner)."
+        };
+      }
+      const result = await runTests(workspace);
+      const detailParts: string[] = [];
+      detailParts.push(`project: ${result.projectType ?? "unknown"}`);
+      detailParts.push(`command: ${result.command || "(none)"}`);
+      if (result.failingTests && result.failingTests.length) {
+        detailParts.push(`failing:\n- ${result.failingTests.join("\n- ")}`);
+      }
+      if (result.rawOutput) detailParts.push(result.rawOutput);
+      return {
+        ok: result.passed,
+        summary: result.summary,
         detail: detailParts.join("\n")
       };
     }
