@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { z } from "zod";
+import { getAllowedRoots, isInsideAnyRoot } from "./browse.js";
 import { runTests } from "./testRunner.js";
 import { Workspace, assertPathInsideWorkspace, resolveWorkspace } from "./workspace.js";
 
@@ -139,9 +140,20 @@ export async function executeTool(
       };
     }
     case "clone_repo": {
-      const destParent = dirname(call.destination);
+      if (!isAbsolute(call.destination)) {
+        return { ok: false, summary: `clone_repo destination must be an absolute path. Received: ${call.destination}` };
+      }
+      const destination = resolvePath(call.destination);
+      const roots = await getAllowedRoots();
+      if (!isInsideAnyRoot(destination, roots)) {
+        return {
+          ok: false,
+          summary: `Refused: clone destination ${destination} is outside the allowed browse roots (${roots.join(", ")}). Set BROWSE_ROOTS to expand the sandbox.`
+        };
+      }
+      const destParent = dirname(destination);
       await mkdir(destParent, { recursive: true }).catch(() => undefined);
-      const result = await runCommand("git", ["clone", call.repoUrl, call.destination], destParent, undefined, signal);
+      const result = await runCommand("git", ["clone", call.repoUrl, destination], destParent, undefined, signal);
       if (result.code !== 0) {
         return {
           ok: false,
@@ -149,10 +161,10 @@ export async function executeTool(
           detail: result.stderr || result.stdout
         };
       }
-      const next = call.setAsWorkspace ? await resolveWorkspace(call.destination) : undefined;
+      const next = call.setAsWorkspace ? await resolveWorkspace(destination) : undefined;
       return {
         ok: true,
-        summary: `Cloned ${call.repoUrl} to ${call.destination}${next ? " (workspace updated)" : ""}.`,
+        summary: `Cloned ${call.repoUrl} to ${destination}${next ? " (workspace updated)" : ""}.`,
         detail: result.stdout + result.stderr,
         ...(next ? { workspace: next } : {})
       };

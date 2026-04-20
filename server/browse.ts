@@ -14,7 +14,7 @@ export type BrowseResult = {
   entries: BrowseEntry[];
 };
 
-async function getAllowedRoots(): Promise<string[]> {
+export async function getAllowedRoots(): Promise<string[]> {
   const raw = process.env.BROWSE_ROOTS;
   const configured = raw
     ? raw
@@ -29,7 +29,7 @@ async function getAllowedRoots(): Promise<string[]> {
   );
 }
 
-function isInsideAnyRoot(path: string, roots: string[]): boolean {
+export function isInsideAnyRoot(path: string, roots: string[]): boolean {
   return roots.some((root) => path === root || path.startsWith(root + sep));
 }
 
