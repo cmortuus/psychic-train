@@ -124,7 +124,7 @@ async function runToolWithDelegate(
   signal?: AbortSignal
 ): Promise<{ ok: boolean; summary: string; detail?: string; workspace?: Workspace }> {
   if (call.type !== "delegate_coding_task") {
-    return executeTool(call, workspace);
+    return executeTool(call, workspace, signal);
   }
 
   const sessionRequest: SessionRequest = {
