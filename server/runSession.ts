@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AnonymizeMap, createAnonymizeMap, desanitize, getExtraPatterns, sanitize } from "./anonymizer.js";
 import { preflightDaemons } from "./ollamaApi.js";
 import { CancelledError, generateText } from "./providers.js";
 import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult } from "./types.js";
@@ -104,11 +105,35 @@ const operatorSystemPrompt = [
   "Focus on concrete repo steps such as file edits, tests, git commands, or shell commands."
 ].join(" ");
 
+function resolveAnonymize(request: SessionRequest): boolean {
+  if (typeof request.anonymize === "boolean") return request.anonymize;
+  const env = process.env.ANONYMIZE_OUTBOUND;
+  if (!env) return false;
+  return env.toLowerCase() === "true" || env === "1";
+}
+
+function enforceLocalOperator(request: SessionRequest): void {
+  if (process.env.ENFORCE_LOCAL_OPERATOR?.toLowerCase() !== "true") return;
+  if (!request.operator) return;
+  if (request.operator.model.includes(":cloud")) {
+    throw new Error(
+      `Invalid request: operator must be local (got ${request.operator.model}); set ENFORCE_LOCAL_OPERATOR=false to bypass.`
+    );
+  }
+}
+
 export async function runDualAgentSession(
   request: SessionRequest,
   hooks: SessionHooks = {},
   signal?: AbortSignal
 ): Promise<SessionResult> {
+  enforceLocalOperator(request);
+  const anonymize = resolveAnonymize(request);
+  const anonMap: AnonymizeMap | null = anonymize ? createAnonymizeMap() : null;
+  const extraPatterns = anonymize ? getExtraPatterns() : [];
+  const maybeSanitize = (text: string) => (anonMap ? sanitize(text, anonMap, extraPatterns) : text);
+  const maybeDesanitize = (text: string) => (anonMap ? desanitize(text, anonMap) : text);
+
   const transcript: AgentTurn[] = [];
   let currentCode = "";
   let currentSummary = "";
@@ -136,6 +161,20 @@ export async function runDualAgentSession(
     };
   };
 
+  const desanitizeStringsIn = <T>(value: T): T => {
+    if (!anonMap) return value;
+    if (typeof value === "string") return maybeDesanitize(value) as unknown as T;
+    if (Array.isArray(value)) return value.map(desanitizeStringsIn) as unknown as T;
+    if (value && typeof value === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+        out[key] = desanitizeStringsIn(v);
+      }
+      return out as unknown as T;
+    }
+    return value;
+  };
+
   for (let round = 1; round <= request.maxRounds; round += 1) {
     if (signal?.aborted) {
       return cancelledResult();
@@ -147,11 +186,11 @@ export async function runDualAgentSession(
       model: request.writer.model
     });
     const writerStartedAt = Date.now();
-    const writerData = await generateStructured(
+    const writerDataRaw = await generateStructured(
       request.writer,
       [
         { role: "system", content: writerSystemPrompt },
-        { role: "user", content: writerPrompt }
+        { role: "user", content: maybeSanitize(writerPrompt) }
       ],
       writerResponseSchema,
       "writer",
@@ -159,6 +198,7 @@ export async function runDualAgentSession(
       hooks,
       signal
     );
+    const writerData = desanitizeStringsIn(writerDataRaw);
     hooks.onRoundComplete?.({
       agent: "writer",
       round,
@@ -184,11 +224,11 @@ export async function runDualAgentSession(
       model: request.critic.model
     });
     const criticStartedAt = Date.now();
-    const criticData = (await generateStructured(
+    const criticRaw = (await generateStructured(
       request.critic,
       [
         { role: "system", content: criticSystemPrompt },
-        { role: "user", content: criticPrompt }
+        { role: "user", content: maybeSanitize(criticPrompt) }
       ],
       criticResponseSchema,
       "critic",
@@ -196,6 +236,7 @@ export async function runDualAgentSession(
       hooks,
       signal
     )) as CriticResponse;
+    const criticData = desanitizeStringsIn(criticRaw);
     hooks.onRoundComplete?.({
       agent: "critic",
       round,

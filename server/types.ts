@@ -28,6 +28,7 @@ export type SessionRequest = {
   critic: ProviderConfig;
   operator?: ProviderConfig;
   maxRounds: number;
+  anonymize?: boolean;
 };
 
 export type SessionResult = {
