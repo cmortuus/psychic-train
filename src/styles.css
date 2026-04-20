@@ -149,6 +149,20 @@ button:disabled {
   opacity: 0.7;
 }
 
+.button-row {
+  display: flex;
+  gap: 10px;
+}
+
+.button-row button {
+  flex: 1;
+}
+
+.stop-button {
+  background: #ff8f80 !important;
+  color: #1c0806 !important;
+}
+
 .provider-block,
 .panel,
 .status-bar {

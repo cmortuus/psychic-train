@@ -2,6 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { logError, logInfo } from "./logger.js";
 import { DaemonUnreachableError, fetchOllamaTags } from "./ollamaApi.js";
+import { CancelledError } from "./providers.js";
 import { runDualAgentSession } from "./runSession.js";
 import { serveStatic } from "./static.js";
 import { ProviderConfig, SessionRequest } from "./types.js";
@@ -93,26 +94,36 @@ const server = createServer(async (req, res) => {
       res.setHeader("Connection", "keep-alive");
       res.writeHead(200);
 
+      const abortController = new AbortController();
+      const onClientClose = () => abortController.abort();
+      req.on("close", onClientClose);
+
       const send = (event: string, data: unknown) => {
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        if (!res.writableEnded) {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
       };
 
       try {
-        const result = await runDualAgentSession(parsed, {
-          onTurn(turn) { send("turn", turn); },
-          onRoundStart(details) {
-            logInfo("session.round.start", details);
-            send("round_start", details);
+        const result = await runDualAgentSession(
+          parsed,
+          {
+            onTurn(turn) { send("turn", turn); },
+            onRoundStart(details) {
+              logInfo("session.round.start", details);
+              send("round_start", details);
+            },
+            onRoundComplete(details) {
+              logInfo("session.round.complete", details);
+              send("round_complete", details);
+            },
+            onParseFailure(details) {
+              logError("session.parse_failure", details);
+              send("parse_failure", details);
+            }
           },
-          onRoundComplete(details) {
-            logInfo("session.round.complete", details);
-            send("round_complete", details);
-          },
-          onParseFailure(details) {
-            logError("session.parse_failure", details);
-            send("parse_failure", details);
-          }
-        });
+          abortController.signal
+        );
         logInfo("session.complete", {
           status: result.status,
           transcriptTurns: result.transcript.length,
@@ -120,11 +131,17 @@ const server = createServer(async (req, res) => {
         });
         send("done", result);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        const code = error instanceof DaemonUnreachableError ? error.code : undefined;
-        logError("session.error", { message, ...(code ? { code } : {}) });
-        send("error", { message, ...(code ? { code } : {}) });
+        if (error instanceof CancelledError) {
+          logInfo("session.cancelled", {});
+          send("cancelled", { message: error.message });
+        } else {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          const code = error instanceof DaemonUnreachableError ? error.code : undefined;
+          logError("session.error", { message, ...(code ? { code } : {}) });
+          send("error", { message, ...(code ? { code } : {}) });
+        }
       } finally {
+        req.off("close", onClientClose);
         res.end();
         logInfo("http.request", {
           method: req.method,

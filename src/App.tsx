@@ -78,6 +78,7 @@ export function App() {
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [localModels, setLocalModels] = useState<string[]>([]);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +108,9 @@ export function App() {
     if (!result) {
       return "Idle";
     }
-    return result.status === "approved" ? "Approved" : "Needs more rounds";
+    if (result.status === "approved") return "Approved";
+    if (result.status === "cancelled") return "Cancelled";
+    return "Needs more rounds";
   }, [result]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -117,6 +120,9 @@ export function App() {
     setResult(null);
     setLiveTranscript([]);
     setActiveAgent(null);
+
+    const controller = new AbortController();
+    setAbortController(controller);
 
     const body = {
       prompt,
@@ -129,41 +135,59 @@ export function App() {
     let streamError: string | null = null;
 
     try {
-      await streamSession(body, (event, data) => {
-        if (event === "turn") {
-          setLiveTranscript((prior) => [...prior, data as TranscriptTurn]);
-          return;
-        }
-        if (event === "round_start") {
-          const details = data as { agent: string; round: number };
-          setActiveAgent(`${details.agent} · round ${details.round}`);
-          return;
-        }
-        if (event === "round_complete") {
-          setActiveAgent(null);
-          return;
-        }
-        if (event === "done") {
-          setResult(data as SessionResponse);
-          setActiveAgent(null);
-          return;
-        }
-        if (event === "error") {
-          const payload = data as { message?: string };
-          streamError = payload.message || "Session failed";
-          setActiveAgent(null);
-        }
-      });
+      await streamSession(
+        body,
+        (event, data) => {
+          if (event === "turn") {
+            setLiveTranscript((prior) => [...prior, data as TranscriptTurn]);
+            return;
+          }
+          if (event === "round_start") {
+            const details = data as { agent: string; round: number };
+            setActiveAgent(`${details.agent} · round ${details.round}`);
+            return;
+          }
+          if (event === "round_complete") {
+            setActiveAgent(null);
+            return;
+          }
+          if (event === "done") {
+            setResult(data as SessionResponse);
+            setActiveAgent(null);
+            return;
+          }
+          if (event === "cancelled") {
+            streamError = "Session cancelled.";
+            setActiveAgent(null);
+            return;
+          }
+          if (event === "error") {
+            const payload = data as { message?: string };
+            streamError = payload.message || "Session failed";
+            setActiveAgent(null);
+          }
+        },
+        controller.signal
+      );
 
       if (streamError) {
         setError(streamError);
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unknown error");
+      if (requestError instanceof Error && requestError.name === "AbortError") {
+        setError("Session cancelled.");
+      } else {
+        setError(requestError instanceof Error ? requestError.message : "Unknown error");
+      }
     } finally {
       setIsRunning(false);
       setActiveAgent(null);
+      setAbortController(null);
     }
+  }
+
+  function handleStop() {
+    abortController?.abort();
   }
 
   return (
@@ -222,9 +246,16 @@ export function App() {
             />
           </label>
 
-          <button type="submit" disabled={isRunning}>
-            {isRunning ? "Running..." : "Run Session"}
-          </button>
+          <div className="button-row">
+            <button type="submit" disabled={isRunning}>
+              {isRunning ? "Running..." : "Run Session"}
+            </button>
+            {isRunning ? (
+              <button type="button" className="stop-button" onClick={handleStop}>
+                Stop
+              </button>
+            ) : null}
+          </div>
         </form>
       </aside>
 
