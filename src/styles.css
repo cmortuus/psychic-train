@@ -213,6 +213,16 @@ button:disabled {
   color: #c7d4e0;
 }
 
+.model-badge-abliterated {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(133, 167, 255, 0.18);
+  color: #85a7ff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .panel {
   overflow: visible;
   min-width: 0;

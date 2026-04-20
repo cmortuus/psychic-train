@@ -78,20 +78,66 @@ At `info`, the server logs:
 
 At `debug`, it also logs redacted Ollama command previews and output previews.
 
-Available model options:
+Curated cloud model options (grouped by country of origin; US on top):
 
-- `gpt-oss` -> `gpt-oss:20b-cloud` — OpenAI
-- `gemma3` -> `gemma3:12b-cloud` — Google
-- `gemma4` -> `gemma4:31b-cloud` — Google DeepMind / Google
-- `gemini-3-flash-preview` -> `gemini-3-flash-preview:cloud` — Google
-- `nemotron-3-nano` -> `nemotron-3-nano:30b-cloud` — NVIDIA
-- `rnj-1` -> `rnj-1:8b-cloud` — Essential AI
+- **US**
+  - `gpt-oss:20b-cloud` — OpenAI
+  - `gpt-oss:120b-cloud` — OpenAI
+- **China**
+  - `deepseek-v3.1:671b-cloud` — DeepSeek
+  - `qwen3-coder:480b-cloud` — Alibaba Qwen
+  - `kimi-k2:1t-cloud` — Moonshot
+  - `glm-4.6:cloud` — Zhipu AI
+
+Anything Ollama reports on `GET /api/tags` also appears in the dropdown under `Local`.
 
 ## Suggested setup
 
-- Writer: `gpt-oss` on `ollama`
-- Critic: `gemini-3-flash-preview` on `ollama`
-- Operator: `rnj-1` on `ollama` for repo and terminal follow-up actions
+- Writer: `gpt-oss:20b-cloud`
+- Critic: `gpt-oss:120b-cloud` (default; picks up on failures the writer misses)
+- Operator: a local model (keep it off-device and on the trust boundary)
+
+## Privacy controls
+
+The sidebar exposes two defensive toggles:
+
+- **Anonymize outbound prompts** (default on) — paths, emails, git remotes, and common secret formats are replaced with stable tokens (`<PATH_1>`, `<REMOTE_1>`, …) before prompts leave the box, and rehydrated on the response. Env override: `ANONYMIZE_OUTBOUND=true|false`, plus `ANONYMIZE_PATTERNS=literal1,literal2` for extra strings.
+- **Keep code on US models only** — disables non-US entries in the model dropdown; the server rejects sessions whose writer/critic would route to a non-US cloud.
+
+Set `ENFORCE_LOCAL_OPERATOR=true` to reject any operator model whose tag contains `:cloud`.
+
+## Abliteration (Heretic) for cloud models
+
+Safety tuning in modern open-weight LLMs sometimes surfaces as refusals on benign coding topics. [Heretic](https://github.com/p-e-w/heretic) strips the refusal direction out of a model's activations and emits a new copy of the weights.
+
+> **What abliteration does not do.** It does not remove inference-host telemetry or logging — those live outside the weights. For data-leakage concerns route to trusted hosts or stay local.
+
+### Runbook
+
+1. Install Heretic (requires a GPU):
+
+   ```bash
+   pip install heretic-llm
+   ```
+
+2. Run it against the model you want to abliterate (example with Qwen3 Coder):
+
+   ```bash
+   heretic ./qwen3-coder-480b
+   ```
+
+   This produces a new directory like `qwen3-coder-480b-abliterated/`.
+
+3. Build an Ollama model from the abliterated weights (Modelfile-based import; see [Ollama docs](https://github.com/ollama/ollama/blob/main/docs/import.md)). You'll end up with a local tag like `qwen3-coder-abliterated:480b`.
+
+4. Expose it to the app via env so the status bar badges the model:
+
+   ```bash
+   VITE_ABLITERATED_MODELS=qwen3-coder-abliterated:480b
+   npm run dev
+   ```
+
+   (Comma-separated list.) Pick the tag from the **Local** group in the dropdown — it will show an `abliterated` badge in the status bar.
 
 ## Production build
 
