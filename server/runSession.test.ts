@@ -165,18 +165,17 @@ describe("runDualAgentSession", () => {
     const generate = generateText as unknown as ReturnType<typeof vi.fn>;
     generate.mockReset();
 
-    generate.mockImplementation((_provider: unknown, messages: Array<{ role: string }>) => {
-      const role = messages[0]?.role;
-      if (role === "system") {
-        const content = (messages[0] as { content: string }).content;
-        if (content.startsWith("You are the writing")) {
+    generate.mockImplementation(
+      (_provider: unknown, messages: Array<{ role: string; content: string }>) => {
+        const system = messages[0];
+        if (system?.role === "system" && system.content.startsWith("You are the writing")) {
           return Promise.resolve({ text: '{"summary":"draft","code":"x"}' });
         }
+        return Promise.resolve({
+          text: '{"summary":"not yet","verdict":"revise","required_changes":["try harder"]}'
+        });
       }
-      return Promise.resolve({
-        text: '{"summary":"not yet","verdict":"revise","required_changes":["try harder"]}'
-      });
-    });
+    );
 
     const result = await runDualAgentSession({
       prompt: "do a thing",
