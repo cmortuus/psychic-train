@@ -1,6 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { logError, logInfo } from "./logger.js";
+import { DaemonUnreachableError } from "./ollamaApi.js";
 import { runDualAgentSession } from "./runSession.js";
 import { serveStatic } from "./static.js";
 import { ProviderConfig, SessionRequest } from "./types.js";
@@ -79,10 +80,18 @@ const server = createServer(async (req, res) => {
       sendJson(res, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      const status = message.startsWith("Invalid request") ? 400 : 500;
+      let status = 500;
+      let code: string | undefined;
+      if (message.startsWith("Invalid request")) {
+        status = 400;
+      } else if (error instanceof DaemonUnreachableError) {
+        status = 502;
+        code = error.code;
+      }
       logError("session.error", {
         status,
-        message
+        message,
+        ...(code ? { code } : {})
       });
       logInfo("http.request", {
         method: req.method,
@@ -90,7 +99,7 @@ const server = createServer(async (req, res) => {
         status,
         durationMs: Date.now() - startedAt
       });
-      sendJson(res, status, { error: message });
+      sendJson(res, status, { error: message, ...(code ? { code } : {}) });
     }
     return;
   }
