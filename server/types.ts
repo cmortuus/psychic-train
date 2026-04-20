@@ -1,4 +1,4 @@
-export type ProviderKind = "ollama" | "anthropic" | "openai-compatible";
+export type ProviderKind = "ollama";
 
 export type ProviderConfig = {
   provider: ProviderKind;
