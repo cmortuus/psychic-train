@@ -2,6 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { AutopilotRequest, ShellDisabledError, runAutopilot } from "./autopilot.js";
 import { browseDirectory } from "./browse.js";
+import { startSseHeartbeat } from "./sseHeartbeat.js";
 import { executeTool, toolCallSchema } from "./tools.js";
 import { dismissWatchdogItem, startWatchdog, watchdogReport } from "./watchdog.js";
 import { resolveWorkspace } from "./workspace.js";
@@ -196,6 +197,7 @@ const server = createServer(async (req, res) => {
       const abortController = new AbortController();
       const onClientClose = () => abortController.abort();
       req.on("close", onClientClose);
+      const stopHeartbeat = startSseHeartbeat(res);
 
       const send = (event: string, data: unknown) => {
         if (!res.writableEnded) {
@@ -252,6 +254,7 @@ const server = createServer(async (req, res) => {
           send("error", { message, ...(code ? { code } : {}) });
         }
       } finally {
+        stopHeartbeat();
         req.off("close", onClientClose);
         res.end();
         logInfo("http.request", {
@@ -347,6 +350,7 @@ const server = createServer(async (req, res) => {
       const abortController = new AbortController();
       const onClientClose = () => abortController.abort();
       req.on("close", onClientClose);
+      const stopHeartbeat = startSseHeartbeat(res);
 
       const send = (event: string, data: unknown) => {
         if (!res.writableEnded) {
@@ -385,6 +389,7 @@ const server = createServer(async (req, res) => {
           send("error", { message, ...(code ? { code } : {}) });
         }
       } finally {
+        stopHeartbeat();
         req.off("close", onClientClose);
         res.end();
       }
@@ -415,6 +420,7 @@ const server = createServer(async (req, res) => {
       const abortController = new AbortController();
       const onClientClose = () => abortController.abort();
       req.on("close", onClientClose);
+      const stopHeartbeat = startSseHeartbeat(res);
 
       const send = (event: string, data: unknown) => {
         if (!res.writableEnded) {
@@ -445,6 +451,7 @@ const server = createServer(async (req, res) => {
           send("error", { message, ...(code ? { code } : {}) });
         }
       } finally {
+        stopHeartbeat();
         req.off("close", onClientClose);
         res.end();
         logInfo("http.request", {
