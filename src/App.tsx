@@ -92,7 +92,7 @@ export function App() {
     setResult(null);
 
     try {
-      const response = await fetch("http://localhost:8787/api/session", {
+      const response = await fetch("/api/session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
