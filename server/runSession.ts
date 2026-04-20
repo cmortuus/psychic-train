@@ -1,3 +1,4 @@
+import { jsonrepair } from "jsonrepair";
 import { z } from "zod";
 import { AnonymizeMap, createAnonymizeMap, desanitize, getExtraPatterns, sanitize } from "./anonymizer.js";
 import { logDebug, logError } from "./logger.js";
@@ -737,30 +738,75 @@ function tryParseJson<T>(rawText: string, schema: z.ZodSchema<T>): ParseResult<T
   const trimmed = rawText.trim();
   const excerpt = rawText.replace(/\s+/g, " ").slice(0, 300);
 
-  let jsonText: string;
-  try {
-    jsonText = extractJsonObject(trimmed);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "Unknown parsing error";
-    return { ok: false, reason, excerpt };
+  // Candidate JSON bodies we'll try in order. We start from the strictest
+  // extraction (balanced braces) and fall back to progressively more lenient
+  // shapes so that truncated / decorated output still has a shot.
+  const candidates = collectJsonCandidates(trimmed);
+  if (candidates.length === 0) {
+    return { ok: false, reason: "Response did not contain a JSON object", excerpt };
   }
 
-  try {
-    return { ok: true, value: schema.parse(JSON.parse(jsonText)) };
-  } catch (firstError) {
-    // Try a lenient repair pass: escape raw control characters that the model
-    // forgot to escape inside string literals (newlines, tabs, CRs).
+  let firstError: unknown = null;
+
+  for (const candidate of candidates) {
+    // Strict parse first — zero-touch is always preferred.
     try {
-      const repaired = repairControlCharsInJsonStrings(jsonText);
-      if (repaired !== jsonText) {
+      return { ok: true, value: schema.parse(JSON.parse(candidate)) };
+    } catch (error) {
+      if (firstError === null) firstError = error;
+    }
+
+    // Cheap repair: escape raw control chars inside string literals.
+    try {
+      const repaired = repairControlCharsInJsonStrings(candidate);
+      if (repaired !== candidate) {
         return { ok: true, value: schema.parse(JSON.parse(repaired)) };
       }
     } catch {
-      // fall through to original error
+      // fall through
     }
-    const reason = firstError instanceof Error ? firstError.message : "Unknown parsing error";
-    return { ok: false, reason, excerpt };
+
+    // Heavy repair: jsonrepair handles trailing commas, smart quotes, missing
+    // braces, Python-ish True/False/None, single-quoted keys, unescaped quotes,
+    // truncated JSON, etc.
+    try {
+      const repaired = jsonrepair(candidate);
+      return { ok: true, value: schema.parse(JSON.parse(repaired)) };
+    } catch {
+      // try next candidate
+    }
   }
+
+  const reason = firstError instanceof Error ? firstError.message : "Unknown parsing error";
+  return { ok: false, reason, excerpt };
+}
+
+function collectJsonCandidates(text: string): string[] {
+  const seen = new Set<string>();
+  const push = (value: string | null) => {
+    if (!value) return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (!seen.has(trimmed)) seen.add(trimmed);
+  };
+
+  try {
+    push(extractJsonObject(text));
+  } catch {
+    // fall back to loose extractions
+  }
+
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    push(text.slice(firstBrace, lastBrace + 1));
+  }
+  if (firstBrace !== -1) {
+    // Handles truncation: jsonrepair will close the unclosed braces.
+    push(text.slice(firstBrace));
+  }
+
+  return Array.from(seen);
 }
 
 export function repairControlCharsInJsonStrings(text: string): string {
