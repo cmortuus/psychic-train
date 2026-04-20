@@ -558,6 +558,12 @@ button:disabled {
   gap: 8px;
 }
 
+.round-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .chat-header-actions {
   display: flex;
   align-items: center;
