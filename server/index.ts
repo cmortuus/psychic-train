@@ -1,9 +1,12 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { resolve } from "node:path";
 import { logError, logInfo } from "./logger.js";
 import { runDualAgentSession } from "./runSession.js";
+import { serveStatic } from "./static.js";
 import { ProviderConfig, SessionRequest } from "./types.js";
 
 const port = Number(process.env.PORT || 8787);
+const staticRoot = resolve(process.cwd(), process.env.STATIC_ROOT || "dist");
 
 const server = createServer(async (req, res) => {
   const startedAt = Date.now();
@@ -90,6 +93,21 @@ const server = createServer(async (req, res) => {
       sendJson(res, status, { error: message });
     }
     return;
+  }
+
+  if (req.method === "GET" && !req.url.startsWith("/api/")) {
+    res.removeHeader("Content-Type");
+    const outcome = await serveStatic(req.url, staticRoot, res);
+    if (outcome === "served") {
+      logInfo("http.request", {
+        method: req.method,
+        path: req.url,
+        status: 200,
+        durationMs: Date.now() - startedAt
+      });
+      return;
+    }
+    res.setHeader("Content-Type", "application/json");
   }
 
   logInfo("http.request", {
