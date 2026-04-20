@@ -60,12 +60,29 @@ export function ChatView({ operator, writer, critic, onDelegateTurn, onDelegateS
   const [pickerOpen, setPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef<boolean>(true);
 
   const activeWorkspace = useMemo(() => workspaceRoot || "(default: server cwd)", [workspaceRoot]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [timeline.length]);
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance <= 48;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [timeline.length, isRunning]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
