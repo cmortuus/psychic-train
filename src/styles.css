@@ -176,7 +176,8 @@ button:disabled {
 }
 
 .panel {
-  overflow: hidden;
+  overflow: visible;
+  min-width: 0;
 }
 
 .panel-header,
@@ -191,6 +192,8 @@ button:disabled {
 .transcript {
   display: grid;
   gap: 12px;
+  max-height: min(60vh, 640px);
+  overflow-y: auto;
 }
 
 .operator-list {
@@ -221,9 +224,51 @@ button:disabled {
   padding: 16px;
   overflow: auto;
   min-height: 320px;
+  max-height: min(70vh, 720px);
   background: #050b11;
   border: 1px solid rgba(201, 219, 233, 0.12);
   color: #d8e4ef;
+  white-space: pre;
+}
+
+.turn-code-toggle {
+  margin-top: 10px;
+}
+
+.turn-code-toggle summary {
+  cursor: pointer;
+  color: #86a3bf;
+  font-size: 0.85rem;
+  list-style: none;
+}
+
+.turn-code-toggle summary::-webkit-details-marker { display: none; }
+
+.turn-code-toggle summary::before {
+  content: "▸ show code";
+  display: inline-block;
+}
+
+.turn-code-toggle[open] summary::before {
+  content: "▾ hide code";
+}
+
+.turn-code-toggle pre {
+  margin: 8px 0 0;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+  background: #050b11;
+  border: 1px solid rgba(201, 219, 233, 0.12);
+  color: #d8e4ef;
+  white-space: pre;
+  font-size: 0.85rem;
+}
+
+.turn p {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
 }
 
 .error {

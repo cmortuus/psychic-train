@@ -369,6 +369,12 @@ export function App() {
                     {turn.verdict ? <span>{turn.verdict}</span> : null}
                   </div>
                   <p>{turn.summary}</p>
+                  {turn.role === "writer" && turn.code ? (
+                    <details className="turn-code-toggle">
+                      <summary />
+                      <pre>{turn.code}</pre>
+                    </details>
+                  ) : null}
                 </article>
               ));
             })()}
