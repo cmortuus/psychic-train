@@ -175,6 +175,44 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(89, 198, 170, 0.12);
+  border: 1px solid rgba(89, 198, 170, 0.3);
+  font-size: 0.82rem;
+}
+
+.model-badge.non-us {
+  background: rgba(255, 155, 84, 0.12);
+  border-color: rgba(255, 155, 84, 0.4);
+}
+
+.model-badge-label {
+  color: #86a3bf;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.model-badge-country {
+  font-weight: 700;
+}
+
+.model-badge code {
+  color: #c7d4e0;
+}
+
 .panel {
   overflow: visible;
   min-width: 0;

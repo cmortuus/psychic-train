@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AnonymizeMap, createAnonymizeMap, desanitize, getExtraPatterns, sanitize } from "./anonymizer.js";
+import { countryOf, isNonUsCloud } from "./modelMeta.js";
 import { preflightDaemons } from "./ollamaApi.js";
 import { CancelledError, generateText } from "./providers.js";
 import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult } from "./types.js";
@@ -106,10 +107,25 @@ const operatorSystemPrompt = [
 ].join(" ");
 
 function resolveAnonymize(request: SessionRequest): boolean {
+  // When any outbound model is a non-US cloud tag, force anonymize on regardless of preference.
+  const outboundModels = [request.writer.model, request.critic.model];
+  if (outboundModels.some(isNonUsCloud)) return true;
   if (typeof request.anonymize === "boolean") return request.anonymize;
   const env = process.env.ANONYMIZE_OUTBOUND;
   if (!env) return false;
   return env.toLowerCase() === "true" || env === "1";
+}
+
+function enforceUsOnly(request: SessionRequest): void {
+  if (!request.usOnly) return;
+  const offenders = [request.writer, request.critic]
+    .filter((p) => isNonUsCloud(p.model))
+    .map((p) => `${p.model} (${countryOf(p.model)})`);
+  if (offenders.length > 0) {
+    throw new Error(
+      `Invalid request: usOnly is on but a non-US model was selected: ${offenders.join(", ")}.`
+    );
+  }
 }
 
 function enforceLocalOperator(request: SessionRequest): void {
@@ -128,6 +144,7 @@ export async function runDualAgentSession(
   signal?: AbortSignal
 ): Promise<SessionResult> {
   enforceLocalOperator(request);
+  enforceUsOnly(request);
   const anonymize = resolveAnonymize(request);
   const anonMap: AnonymizeMap | null = anonymize ? createAnonymizeMap() : null;
   const extraPatterns = anonymize ? getExtraPatterns() : [];
