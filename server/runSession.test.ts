@@ -4,6 +4,7 @@ import {
   extractJsonObject,
   looksLikeRefusal,
   operatorResponseSchema,
+  repairControlCharsInJsonStrings,
   writerResponseSchema
 } from "./runSession.js";
 
@@ -147,6 +148,58 @@ describe("operatorResponseSchema.kind", () => {
       actions: [{ kind: "filesystem", title: "t", detail: "d" }]
     });
     expect(parsed.actions[0]?.kind).toBe("file");
+  });
+});
+
+describe("writerResponseSchema parse robustness", () => {
+  it("recovers from raw newlines inside the content field via repair pass", async () => {
+    // Simulate what gpt-oss does on multi-file writer output: emits literal LFs
+    // inside string values instead of \\n escape sequences.
+    const broken = [
+      '{"summary":"ok","files":[{"path":"index.js","content":"const greet = ',
+      '() => {\n  console.log(\'hi\');\n}\nexport default greet;"}]}'
+    ].join("");
+    // Direct JSON.parse should fail on this.
+    expect(() => JSON.parse(broken)).toThrow();
+    const repaired = repairControlCharsInJsonStrings(broken);
+    const parsed = writerResponseSchema.parse(JSON.parse(repaired));
+    expect(parsed.files?.[0]?.path).toBe("index.js");
+    expect(parsed.files?.[0]?.content).toContain("console.log");
+  });
+});
+
+describe("repairControlCharsInJsonStrings", () => {
+  it("escapes raw newlines inside a string literal", () => {
+    const input = '{"content":"line1\nline2"}';
+    const repaired = repairControlCharsInJsonStrings(input);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+    expect(JSON.parse(repaired).content).toBe("line1\nline2");
+  });
+
+  it("escapes tabs and carriage returns", () => {
+    const input = '{"c":"a\tb\rc"}';
+    const repaired = repairControlCharsInJsonStrings(input);
+    const parsed = JSON.parse(repaired);
+    expect(parsed.c).toBe("a\tb\rc");
+  });
+
+  it("leaves already-escaped sequences alone", () => {
+    const input = '{"c":"line1\\nline2"}';
+    expect(repairControlCharsInJsonStrings(input)).toBe(input);
+  });
+
+  it("does not touch whitespace outside string literals", () => {
+    const input = '{\n  "a": 1,\n  "b": "x"\n}';
+    const repaired = repairControlCharsInJsonStrings(input);
+    // Newlines between tokens must survive as-is so JSON.parse can read them.
+    expect(repaired).toContain("\n  ");
+    expect(JSON.parse(repaired)).toEqual({ a: 1, b: "x" });
+  });
+
+  it("handles escaped backslashes correctly at string ends", () => {
+    const input = '{"path":"C:\\\\Users\\\\alice","next":"ok"}';
+    expect(repairControlCharsInJsonStrings(input)).toBe(input);
+    expect(JSON.parse(input).path).toBe("C:\\Users\\alice");
   });
 });
 
