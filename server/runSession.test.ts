@@ -159,6 +159,58 @@ describe("runDualAgentSession", () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it("consensus mode: operator gate blocks approval then allows it", async () => {
+    const { generateText } = await import("./providers.js");
+    const { runDualAgentSession } = await import("./runSession.js");
+    const generate = generateText as unknown as ReturnType<typeof vi.fn>;
+    generate.mockReset();
+
+    generate.mockImplementation(
+      (_provider: unknown, messages: Array<{ role: string; content: string }>) => {
+        const systemContent = messages.find((m) => m.role === "system")?.content || "";
+        if (systemContent.startsWith("You are the writing")) {
+          return Promise.resolve({ text: '{"summary":"draft","code":"const x = 1;"}' });
+        }
+        if (systemContent.startsWith("You are the critic")) {
+          return Promise.resolve({ text: '{"summary":"lgtm","verdict":"approved"}' });
+        }
+        if (systemContent.startsWith("You are the operator reviewing")) {
+          const calls = generate.mock.calls.filter((c: unknown[]) => {
+            const msgs = c[1] as Array<{ role: string; content: string }>;
+            const sys = msgs.find((m) => m.role === "system")?.content || "";
+            return sys.startsWith("You are the operator reviewing");
+          }).length;
+          return Promise.resolve({
+            text:
+              calls <= 1
+                ? '{"summary":"needs caching","verdict":"revise","required_changes":["add cache"]}'
+                : '{"summary":"ok","verdict":"approved"}'
+          });
+        }
+        if (systemContent.startsWith("You are the operator model")) {
+          return Promise.resolve({ text: '{"summary":"shipping plan","actions":[]}' });
+        }
+        return Promise.resolve({ text: '{}' });
+      }
+    );
+
+    const result = await runDualAgentSession({
+      prompt: "do it",
+      maxRounds: 4,
+      writer: { provider: "ollama", model: "w" },
+      critic: { provider: "ollama", model: "c" },
+      operator: { provider: "ollama", model: "o" },
+      mode: "consensus"
+    });
+
+    expect(result.status).toBe("approved");
+    const roles = result.transcript.map((t) => t.role);
+    // writer r1, critic r1, operator-review r1 (revise), writer r2, critic r2, operator-review r2 (approve), operator-plan, system
+    expect(roles).toContain("operator");
+    const approvalNote = result.transcript[result.transcript.length - 1];
+    expect(approvalNote.summary).toContain("all approved");
+  });
+
   it("stops at max_rounds when the critic never approves", async () => {
     const { generateText } = await import("./providers.js");
     const { runDualAgentSession } = await import("./runSession.js");

@@ -120,6 +120,7 @@ export function App() {
   );
   const [anonymize, setAnonymize] = useState(true);
   const [usOnly, setUsOnly] = useState(false);
+  const [mode, setMode] = useState<"writer_critic" | "consensus">("writer_critic");
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("psychic-train:sidebar-collapsed") === "true";
@@ -232,6 +233,7 @@ export function App() {
       maxRounds,
       anonymize,
       usOnly,
+      mode,
       writer: normalizeProvider(writer),
       critic: normalizeProvider(critic),
       ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
@@ -370,6 +372,16 @@ export function App() {
                 onChange={(event) => setUsOnly(event.target.checked)}
               />
               <span>Keep code on US models only (disables non-US writer/critic)</span>
+            </label>
+
+            <label>
+              Approval mode
+              <select value={mode} onChange={(event) => setMode(event.target.value as "writer_critic" | "consensus")}>
+                <option value="writer_critic">Writer + Critic (critic is the gate)</option>
+                <option value="consensus" disabled={!enableOperator}>
+                  Consensus (writer + critic + operator all must approve{!enableOperator ? " — requires operator" : ""})
+                </option>
+              </select>
             </label>
 
             <label>

@@ -407,6 +407,7 @@ function parseSessionRequest(value: unknown): SessionRequest {
     maxRounds,
     ...(typeof value.anonymize === "boolean" ? { anonymize: value.anonymize } : {}),
     ...(typeof value.usOnly === "boolean" ? { usOnly: value.usOnly } : {}),
+    ...(value.mode === "consensus" || value.mode === "writer_critic" ? { mode: value.mode } : {}),
     writer: parseProvider(value.writer, "writer"),
     critic: parseProvider(value.critic, "critic"),
     ...(value.operator ? { operator: parseProvider(value.operator, "operator") } : {})

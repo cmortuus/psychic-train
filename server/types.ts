@@ -22,6 +22,8 @@ export type OperatorAction = {
   command?: string;
 };
 
+export type SessionMode = "writer_critic" | "consensus";
+
 export type SessionRequest = {
   prompt: string;
   writer: ProviderConfig;
@@ -30,6 +32,7 @@ export type SessionRequest = {
   maxRounds: number;
   anonymize?: boolean;
   usOnly?: boolean;
+  mode?: SessionMode;
 };
 
 export type SessionResult = {

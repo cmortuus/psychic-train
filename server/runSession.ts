@@ -106,6 +106,14 @@ const operatorSystemPrompt = [
   "Focus on concrete repo steps such as file edits, tests, git commands, or shell commands."
 ].join(" ");
 
+const operatorReviewSystemPrompt = [
+  "You are the operator reviewing a candidate code solution in a consensus coding system.",
+  "The critic has already signed off on this code; you are the final gate.",
+  "Focus on higher-order concerns: correctness of the approach, missed requirements, deployability, side effects, secrets, obvious footguns.",
+  "Respond only as strict JSON with keys: summary, verdict, required_changes.",
+  "Use verdict=approved only when you are satisfied. Otherwise return verdict=revise with required_changes as a concrete bullet list."
+].join(" ");
+
 function resolveAnonymize(request: SessionRequest): boolean {
   // When any outbound model is a non-US cloud tag, force anonymize on regardless of preference.
   const outboundModels = [request.writer.model, request.critic.model];
@@ -271,13 +279,58 @@ export async function runDualAgentSession(
     hooks.onTurn?.(criticTurn);
 
     if (criticData.verdict === "approved") {
+      const consensus = request.mode === "consensus" && request.operator;
+      if (consensus) {
+        hooks.onRoundStart?.({
+          agent: "operator",
+          round,
+          model: request.operator!.model
+        });
+        const operatorReviewStartedAt = Date.now();
+        const operatorReview = (await generateStructured(
+          request.operator!,
+          [
+            { role: "system", content: operatorReviewSystemPrompt },
+            { role: "user", content: maybeSanitize(buildOperatorReviewPrompt(request.prompt, currentCode, round)) }
+          ],
+          criticResponseSchema,
+          "operator",
+          round,
+          hooks,
+          signal
+        )) as CriticResponse;
+        const operatorReviewData = desanitizeStringsIn(operatorReview);
+        hooks.onRoundComplete?.({
+          agent: "operator",
+          round,
+          model: request.operator!.model,
+          durationMs: Date.now() - operatorReviewStartedAt
+        });
+        const operatorReviewTurn: AgentTurn = {
+          role: "operator",
+          round,
+          summary: operatorReviewData.summary,
+          verdict: operatorReviewData.verdict
+        };
+        transcript.push(operatorReviewTurn);
+        hooks.onTurn?.(operatorReviewTurn);
+
+        if (operatorReviewData.verdict === "revise") {
+          pendingChanges = [
+            ...(criticData.required_changes ?? []),
+            ...(operatorReviewData.required_changes ?? []).map((c) => `[operator] ${c}`)
+          ];
+          continue;
+        }
+      }
+
       operatorPlan = request.operator
         ? await runOperatorStage(request, currentCode, round, hooks, transcript, signal)
         : undefined;
       const systemTurn: AgentTurn = {
         role: "system",
         round,
-        summary: "Both agents reached approval."
+        summary: consensus ? "Writer, critic, and operator all approved." : "Both agents reached approval."
       };
       transcript.push(systemTurn);
       hooks.onTurn?.(systemTurn);
@@ -388,6 +441,15 @@ function buildCriticPrompt(userPrompt: string, code: string, round: number): str
     `User request:\n${userPrompt}`,
     `Review round: ${round}`,
     `Candidate code:\n${code}`
+  ].join("\n\n");
+}
+
+function buildOperatorReviewPrompt(userPrompt: string, code: string, round: number): string {
+  return [
+    `User request:\n${userPrompt}`,
+    `Review round: ${round}`,
+    `Candidate code:\n${code}`,
+    "The critic has just approved this code. Decide whether you also approve or need revisions."
   ].join("\n\n");
 }
 
