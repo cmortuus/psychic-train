@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { streamSession } from "./sseSession";
 
 type ProviderKind = "ollama";
 
@@ -72,6 +73,8 @@ export function App() {
     apiKey: ""
   });
   const [result, setResult] = useState<SessionResponse | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState<TranscriptTurn[]>([]);
+  const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [localModels, setLocalModels] = useState<string[]>([]);
@@ -112,32 +115,54 @@ export function App() {
     setIsRunning(true);
     setError("");
     setResult(null);
+    setLiveTranscript([]);
+    setActiveAgent(null);
+
+    const body = {
+      prompt,
+      maxRounds,
+      writer: normalizeProvider(writer),
+      critic: normalizeProvider(critic),
+      ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
+    };
+
+    let streamError: string | null = null;
 
     try {
-      const response = await fetch("/api/session", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          prompt,
-          maxRounds,
-          writer: normalizeProvider(writer),
-          critic: normalizeProvider(critic),
-          ...(enableOperator ? { operator: normalizeProvider(operator) } : {})
-        })
+      await streamSession(body, (event, data) => {
+        if (event === "turn") {
+          setLiveTranscript((prior) => [...prior, data as TranscriptTurn]);
+          return;
+        }
+        if (event === "round_start") {
+          const details = data as { agent: string; round: number };
+          setActiveAgent(`${details.agent} · round ${details.round}`);
+          return;
+        }
+        if (event === "round_complete") {
+          setActiveAgent(null);
+          return;
+        }
+        if (event === "done") {
+          setResult(data as SessionResponse);
+          setActiveAgent(null);
+          return;
+        }
+        if (event === "error") {
+          const payload = data as { message?: string };
+          streamError = payload.message || "Session failed";
+          setActiveAgent(null);
+        }
       });
 
-      const data = (await response.json()) as SessionResponse | { error?: string };
-      if (!response.ok) {
-        throw new Error("error" in data ? data.error || "Request failed" : "Request failed");
+      if (streamError) {
+        setError(streamError);
       }
-
-      setResult(data as SessionResponse);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unknown error");
     } finally {
       setIsRunning(false);
+      setActiveAgent(null);
     }
   }
 
@@ -207,7 +232,7 @@ export function App() {
         <section className="status-bar">
           <div>
             <span className="muted">Session status</span>
-            <strong>{statusLabel}</strong>
+            <strong>{isRunning ? activeAgent || "Running..." : statusLabel}</strong>
           </div>
           <div>
             <span className="muted">Models</span>
@@ -227,8 +252,16 @@ export function App() {
             <h2>Transcript</h2>
           </div>
           <div className="transcript">
-            {result ? (
-              result.transcript.map((turn, index) => (
+            {(() => {
+              const turns = result?.transcript || liveTranscript;
+              if (turns.length === 0) {
+                return (
+                  <div className="empty-state">
+                    <p>Run a session to see the writer draft code and the critic respond.</p>
+                  </div>
+                );
+              }
+              return turns.map((turn, index) => (
                 <article key={`${turn.role}-${turn.round}-${index}`} className={`turn ${turn.role}`}>
                   <div className="turn-meta">
                     <span>{turn.role}</span>
@@ -237,12 +270,8 @@ export function App() {
                   </div>
                   <p>{turn.summary}</p>
                 </article>
-              ))
-            ) : (
-              <div className="empty-state">
-                <p>Run a session to see the writer draft code and the critic respond.</p>
-              </div>
-            )}
+              ));
+            })()}
           </div>
         </section>
 
@@ -250,7 +279,7 @@ export function App() {
           <div className="panel-header">
             <h2>Final code</h2>
           </div>
-          <pre>{result?.finalCode || "// Final code will appear here"}</pre>
+          <pre>{result?.finalCode || latestCodeFrom(liveTranscript) || "// Final code will appear here"}</pre>
         </section>
 
         <section className="panel">
@@ -347,6 +376,16 @@ function ProviderEditor({
       </label>
     </section>
   );
+}
+
+function latestCodeFrom(transcript: TranscriptTurn[]): string {
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const turn = transcript[index];
+    if (turn && turn.role === "writer" && turn.code) {
+      return turn.code;
+    }
+  }
+  return "";
 }
 
 function normalizeProvider(provider: ProviderConfig) {

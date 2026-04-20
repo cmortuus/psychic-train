@@ -76,6 +76,72 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && req.url === "/api/session/stream") {
+    try {
+      const body = await readJsonBody(req);
+      const parsed = parseSessionRequest(body);
+      logInfo("session.start", {
+        promptLength: parsed.prompt.length,
+        maxRounds: parsed.maxRounds,
+        writerModel: parsed.writer.model,
+        criticModel: parsed.critic.model,
+        streaming: true
+      });
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.writeHead(200);
+
+      const send = (event: string, data: unknown) => {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      try {
+        const result = await runDualAgentSession(parsed, {
+          onTurn(turn) { send("turn", turn); },
+          onRoundStart(details) {
+            logInfo("session.round.start", details);
+            send("round_start", details);
+          },
+          onRoundComplete(details) {
+            logInfo("session.round.complete", details);
+            send("round_complete", details);
+          },
+          onParseFailure(details) {
+            logError("session.parse_failure", details);
+            send("parse_failure", details);
+          }
+        });
+        logInfo("session.complete", {
+          status: result.status,
+          transcriptTurns: result.transcript.length,
+          finalCodeLength: result.finalCode.length
+        });
+        send("done", result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        const code = error instanceof DaemonUnreachableError ? error.code : undefined;
+        logError("session.error", { message, ...(code ? { code } : {}) });
+        send("error", { message, ...(code ? { code } : {}) });
+      } finally {
+        res.end();
+        logInfo("http.request", {
+          method: req.method,
+          path: req.url,
+          status: 200,
+          durationMs: Date.now() - startedAt
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Invalid request") ? 400 : 500;
+      logError("session.error", { status, message });
+      sendJson(res, status, { error: message });
+    }
+    return;
+  }
+
   if (req.method === "POST" && req.url === "/api/session") {
     try {
       const body = await readJsonBody(req);
