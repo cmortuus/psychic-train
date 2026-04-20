@@ -626,30 +626,29 @@ export function App() {
           />
         </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Operator plan</h2>
-          </div>
-          {result?.operatorPlan ? (
-            <div className="operator-list">
-              <p>{result.operatorPlan.summary}</p>
-              {result.operatorPlan.actions.map((action, index) => (
-                <article key={`${action.kind}-${index}`} className="turn operator">
-                  <div className="turn-meta">
-                    <span>{action.kind}</span>
-                    <span>{action.title}</span>
-                  </div>
-                  <p>{action.detail}</p>
-                  {action.command ? <pre>{action.command}</pre> : null}
-                </article>
-              ))}
+        {enableOperator ? (
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Operator plan</h2>
             </div>
-          ) : (
-            <div className="empty-state">
-              <p>Enable the operator to get repo and terminal follow-up actions.</p>
-            </div>
-          )}
-        </section>
+            {result?.operatorPlan ? (
+              <div className="operator-list">
+                <p>{result.operatorPlan.summary}</p>
+                {result.operatorPlan.actions.map((action, index) => (
+                  <OperatorActionCard
+                    key={`${action.kind}-${index}`}
+                    action={action}
+                    workspaceRoot={workspaceRoot}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>Run a session to get repo and terminal follow-up actions.</p>
+              </div>
+            )}
+          </section>
+        ) : null}
         </div>
         ) : null}
         {view !== "session" ? (
@@ -787,6 +786,138 @@ function ModelBadge({
       {abliterated ? <span className="model-badge-abliterated" title="Refusal direction orthogonalized">abliterated</span> : null}
     </span>
   );
+}
+
+function OperatorActionCard({
+  action,
+  workspaceRoot
+}: {
+  action: OperatorAction;
+  workspaceRoot: string;
+}) {
+  const [state, setState] = useState<
+    { kind: "idle" } | { kind: "running" } | { kind: "done"; ok: boolean; summary: string; detail?: string }
+  >({ kind: "idle" });
+  const toolCall = operatorActionToTool(action);
+  const disabled = !workspaceRoot || toolCall === null || state.kind === "running";
+
+  async function handleRun() {
+    if (!toolCall) return;
+    if (operatorActionIsDestructive(action) && !window.confirm(`Run this action?\n\n${action.title}\n${action.command ?? ""}`)) return;
+    setState({ kind: "running" });
+    try {
+      const response = await fetch("/api/tool/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolCall, workspaceRoot })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error((payload as { error?: string }).error || `HTTP ${response.status}`);
+      const ok = Boolean((payload as { ok?: boolean }).ok);
+      const summary = String((payload as { summary?: string }).summary || "");
+      const detail = typeof (payload as { detail?: string }).detail === "string"
+        ? (payload as { detail?: string }).detail
+        : undefined;
+      setState({ kind: "done", ok, summary, detail });
+    } catch (error) {
+      setState({
+        kind: "done",
+        ok: false,
+        summary: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  }
+
+  return (
+    <article className="turn operator operator-action">
+      <div className="turn-meta">
+        <span>{action.kind}</span>
+        <span>{action.title}</span>
+      </div>
+      <p>{action.detail}</p>
+      {action.command ? <pre>{action.command}</pre> : null}
+      <div className="operator-action-row">
+        <button
+          type="button"
+          onClick={handleRun}
+          disabled={disabled}
+          title={
+            !workspaceRoot
+              ? "Set a workspace in the sidebar first"
+              : toolCall === null
+                ? "This action type can't be executed automatically"
+                : ""
+          }
+        >
+          {state.kind === "running" ? "Running..." : "Run"}
+        </button>
+        {toolCall === null ? (
+          <span className="provider-meta">No runnable tool for this action kind.</span>
+        ) : null}
+      </div>
+      {state.kind === "done" ? (
+        <article className={`chat-tool-result ${state.ok ? "ok" : "err"}`}>
+          <header>{state.ok ? "tool result · ok" : "tool result · error"}</header>
+          <p>{state.summary}</p>
+          {state.detail ? <pre>{state.detail}</pre> : null}
+        </article>
+      ) : null}
+    </article>
+  );
+}
+
+type ToolCallPayload =
+  | { type: "run_git"; args: string[] }
+  | { type: "run_shell"; command: string; args: string[] }
+  | { type: "run_tests" }
+  | { type: "write_file"; path: string; content: string };
+
+function operatorActionToTool(action: OperatorAction): ToolCallPayload | null {
+  if (action.kind === "git") {
+    const argv = tokenizeCommand(action.command);
+    const args = argv[0] === "git" ? argv.slice(1) : argv;
+    if (args.length === 0) return null;
+    return { type: "run_git", args };
+  }
+  if (action.kind === "shell") {
+    const argv = tokenizeCommand(action.command);
+    if (argv.length === 0) return null;
+    return { type: "run_shell", command: argv[0] as string, args: argv.slice(1) };
+  }
+  if (action.kind === "test") {
+    return { type: "run_tests" };
+  }
+  return null;
+}
+
+function operatorActionIsDestructive(action: OperatorAction): boolean {
+  const cmd = (action.command || "").toLowerCase();
+  if (action.kind === "git") return /\b(push|reset|rebase|clean|checkout)\b/.test(cmd);
+  if (action.kind === "shell") return /\brm\s+-r|rm\s+-f|sudo\b/.test(cmd);
+  return false;
+}
+
+function tokenizeCommand(input?: string): string[] {
+  if (!input) return [];
+  const out: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === " " || ch === "\t") {
+      if (current) { out.push(current); current = ""; }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) out.push(current);
+  return out;
 }
 
 function FinalFilesView({
