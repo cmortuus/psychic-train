@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ChatView } from "./ChatView";
 import { streamSession } from "./sseSession";
 
-type AppView = "session" | "chat";
+type AppView = "session" | "split" | "chat";
 
 type ProviderKind = "ollama";
 
@@ -305,30 +305,23 @@ export function App() {
 
       <main className="workspace">
         <nav className="view-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "session"}
-            className={view === "session" ? "active" : ""}
-            onClick={() => setView("session")}
-          >
-            Session
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "chat"}
-            className={view === "chat" ? "active" : ""}
-            onClick={() => setView("chat")}
-          >
-            Chat
-          </button>
+          {(["session", "split", "chat"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              aria-selected={view === mode}
+              className={view === mode ? "active" : ""}
+              onClick={() => setView(mode)}
+            >
+              {mode === "session" ? "Session" : mode === "chat" ? "Chat" : "Split"}
+            </button>
+          ))}
         </nav>
 
-        {view === "chat" ? (
-          <ChatView operator={operator} writer={writer} critic={critic} />
-        ) : (
-        <>
+        <div className={`workspace-body view-${view}`}>
+        {view !== "chat" ? (
+        <div className="pane session-pane">
         <section className="status-bar">
           <div>
             <span className="muted">Session status</span>
@@ -412,8 +405,14 @@ export function App() {
             </div>
           )}
         </section>
-        </>
-        )}
+        </div>
+        ) : null}
+        {view !== "session" ? (
+          <div className="pane chat-pane">
+            <ChatView operator={operator} writer={writer} critic={critic} />
+          </div>
+        ) : null}
+        </div>
       </main>
     </div>
   );

@@ -308,6 +308,38 @@ button:disabled {
   color: #04130f;
 }
 
+.workspace-body {
+  display: grid;
+  gap: 20px;
+  min-height: 0;
+}
+
+.workspace-body.view-split {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1400px) {
+  .workspace-body.view-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.pane {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane.session-pane {
+  grid-template-rows: auto auto auto auto;
+}
+
+.pane.chat-pane {
+  min-height: 480px;
+}
+
 .chat-view {
   display: grid;
   grid-template-rows: auto 1fr auto;
