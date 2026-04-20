@@ -39,7 +39,7 @@ export async function materializeFiles(
     }
     let absolute: string;
     try {
-      absolute = assertPathInsideWorkspace(workspace, trimmedPath);
+      absolute = await assertPathInsideWorkspace(workspace, trimmedPath);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "path rejected";
       result.skipped.push({ path: trimmedPath, reason });

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ describe("materializeFiles", () => {
 
   beforeEach(async () => {
     const dir = await mkdtemp(join(tmpdir(), "psychic-mat-"));
-    workspace = { root: dir };
+    workspace = { root: await realpath(dir) };
   });
 
   afterEach(async () => {
