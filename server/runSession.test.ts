@@ -53,6 +53,19 @@ describe("writerResponseSchema", () => {
   it("rejects empty summary", () => {
     expect(() => writerResponseSchema.parse({ summary: "", code: "x" })).toThrow();
   });
+
+  it("accepts optional files[] alongside code", () => {
+    const parsed = writerResponseSchema.parse({
+      summary: "multi",
+      code: "entry",
+      files: [
+        { path: "src/a.ts", content: "a" },
+        { path: "src/b.ts", content: "b" }
+      ]
+    });
+    expect(parsed.files).toHaveLength(2);
+    expect(parsed.files?.[0]).toEqual({ path: "src/a.ts", content: "a" });
+  });
 });
 
 describe("criticResponseSchema.verdict", () => {

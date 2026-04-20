@@ -1,18 +1,28 @@
 import { z } from "zod";
 import { AnonymizeMap, createAnonymizeMap, desanitize, getExtraPatterns, sanitize } from "./anonymizer.js";
+import { materializeFiles } from "./materialize.js";
 import { countryOf, isNonUsCloud } from "./modelMeta.js";
 import { preflightDaemons } from "./ollamaApi.js";
 import { CancelledError, generateText } from "./providers.js";
 import { AgentTurn, OperatorAction, SessionHooks, SessionRequest, SessionResult } from "./types.js";
+import { resolveWorkspace } from "./workspace.js";
 
 export { CancelledError };
 
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
+const writerFileSchema = z.object({
+  path: z.string().min(1),
+  content: z.string()
+});
+
 export const writerResponseSchema = z.object({
   summary: z.string().min(1),
-  code: z.string()
+  code: z.string(),
+  files: z.array(writerFileSchema).optional()
 });
+
+export type WriterFile = z.infer<typeof writerFileSchema>;
 
 const criticVerdictSchema: z.ZodType<"revise" | "approved", z.ZodTypeDef, unknown> = z.preprocess((value) => {
   if (typeof value !== "string") {
@@ -86,9 +96,12 @@ export const operatorResponseSchema = z.object({
 
 const writerSystemPrompt = [
   "You are the writing model in a two-agent coding system.",
-  "Produce implementation output only as strict JSON with keys: summary, code.",
-  "The code should be complete enough to satisfy the user's request.",
-  "When you receive critic feedback, revise the code directly and incorporate only justified changes."
+  "Produce implementation output only as strict JSON with keys: summary, code, files.",
+  "summary: one paragraph describing what you built.",
+  "code: the primary module contents (entry point) — always include this.",
+  "files: OPTIONAL array of { path, content } objects for additional files. Use this whenever the solution spans more than one file (tests, package.json, README, sub-modules, config). Paths must be relative to the workspace root and must not contain '..' or absolute prefixes.",
+  "Do not emit placeholders like \"TODO\" or \"<insert code here>\"; every file you list must be complete.",
+  "When you receive critic feedback, revise the code and files directly and incorporate only justified changes."
 ].join(" ");
 
 const criticSystemPrompt = [
@@ -176,6 +189,7 @@ export async function runDualAgentSession(
   let currentSummary = "";
   let pendingChanges: string[] = [];
   let operatorPlan: SessionResult["operatorPlan"];
+  let latestWriterFiles: Array<{ path: string; content: string }> | undefined;
 
   const baseUrls = [request.writer, request.critic, request.operator]
     .filter((config): config is NonNullable<typeof config> => Boolean(config))
@@ -249,6 +263,7 @@ export async function runDualAgentSession(
     });
     currentCode = writerData.code;
     currentSummary = writerData.summary;
+    latestWriterFiles = writerData.files;
 
     const writerTurn: AgentTurn = {
       role: "writer",
@@ -352,6 +367,21 @@ export async function runDualAgentSession(
         transcript.push(keepGoing);
         hooks.onTurn?.(keepGoing);
         continue;
+      }
+
+      const materializedDetails = await maybeMaterialize(request, latestWriterFiles, hooks);
+      if (materializedDetails) {
+        const writeTurn: AgentTurn = {
+          role: "system",
+          round,
+          summary:
+            `Materialized ${materializedDetails.written.length} file(s) into ${materializedDetails.workspaceRoot}` +
+            (materializedDetails.skipped.length
+              ? ` (skipped ${materializedDetails.skipped.length})`
+              : "")
+        };
+        transcript.push(writeTurn);
+        hooks.onTurn?.(writeTurn);
       }
 
       operatorPlan = request.operator
@@ -473,6 +503,21 @@ function buildCriticPrompt(userPrompt: string, code: string, round: number): str
     `Candidate code:\n${code}`,
     "Stress-test this code before approving. Walk through each of the six categories from your system prompt (happy path, empty/null, adversarial, error paths, platform assumptions, subtle correctness). For each, name either the concrete failure mode or the specific reason it doesn't apply. Do not approve without that pass."
   ].join("\n\n");
+}
+
+async function maybeMaterialize(
+  request: SessionRequest,
+  files: Array<{ path: string; content: string }> | undefined,
+  hooks: SessionHooks
+) {
+  if (!request.workspaceRoot || !files || files.length === 0) return null;
+  const workspace = await resolveWorkspace(request.workspaceRoot).catch(() => null);
+  if (!workspace) return null;
+  const result = await materializeFiles(workspace, files);
+  if (result.written.length === 0 && result.skipped.length === 0) return null;
+  const details = { ...result, workspaceRoot: workspace.root };
+  hooks.onFilesMaterialized?.(details);
+  return details;
 }
 
 function buildOperatorReviewPrompt(userPrompt: string, code: string, round: number): string {

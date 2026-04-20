@@ -47,8 +47,15 @@ export type SessionResult = {
   };
 };
 
+export type MaterializedFiles = {
+  written: string[];
+  skipped: Array<{ path: string; reason: string }>;
+  workspaceRoot: string;
+};
+
 export type SessionHooks = {
   onTurn?: (turn: AgentTurn) => void;
+  onFilesMaterialized?: (details: MaterializedFiles) => void;
   onRoundStart?: (details: {
     agent: "writer" | "critic" | "operator";
     round: number;

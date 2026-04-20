@@ -160,6 +160,14 @@ const server = createServer(async (req, res) => {
             onParseFailure(details) {
               logError("session.parse_failure", details);
               send("parse_failure", details);
+            },
+            onFilesMaterialized(details) {
+              logInfo("session.files_materialized", {
+                writtenCount: details.written.length,
+                skippedCount: details.skipped.length,
+                workspaceRoot: details.workspaceRoot
+              });
+              send("files_materialized", details);
             }
           },
           abortController.signal
