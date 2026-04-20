@@ -91,6 +91,16 @@ Curated cloud model options (grouped by country of origin; US on top):
 
 Anything Ollama reports on `GET /api/tags` also appears in the dropdown under `Local`.
 
+### Extend the cloud catalog
+
+Ollama adds and rotates `:cloud` tags faster than this repo can track. Drop your own JSON file at any path and point `CLOUD_CATALOG_PATH` at it — entries are merged on top of the built-in curated list and served via `GET /api/catalog`:
+
+```bash
+CLOUD_CATALOG_PATH=./my-catalog.json npm run dev
+```
+
+See [docs/cloud-catalog-example.json](docs/cloud-catalog-example.json) for the schema. Each entry is `{ tag, country, maker, abliterated? }`. Country is used for the status-bar badge and the **US-only** filter; set it to `"Local"` for abliterated derivatives that you serve from your own daemon.
+
 ## Suggested setup
 
 - Writer: `gpt-oss:20b-cloud`

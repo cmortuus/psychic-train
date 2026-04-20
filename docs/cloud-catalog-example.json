@@ -1,0 +1,9 @@
+[
+  { "tag": "qwen3:32b-cloud", "country": "China", "maker": "Alibaba Qwen" },
+  { "tag": "qwen3:235b-cloud", "country": "China", "maker": "Alibaba Qwen" },
+  { "tag": "qwen3-vl:235b-cloud", "country": "China", "maker": "Alibaba Qwen" },
+  { "tag": "llama3.3:70b-cloud", "country": "US", "maker": "Meta" },
+  { "tag": "mistral-large:cloud", "country": "France", "maker": "Mistral AI" },
+  { "tag": "mixtral:8x22b-cloud", "country": "France", "maker": "Mistral AI" },
+  { "tag": "qwen3-coder-abliterated:480b", "country": "Local", "maker": "self-abliterated", "abliterated": true }
+]
